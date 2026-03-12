@@ -45,9 +45,10 @@
 .sa-tile-active { border-color:rgba(123,189,232,0.65) !important; box-shadow:0 0 0 2px rgba(123,189,232,0.25); }
 
 /* Обложка локации внутри тайла */
-.sa-tile-cover { position:absolute !important; inset:0; background-size:cover; background-position:center; z-index:0; }
-.sa-tile-cover::after { content:''; position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.1) 50%, transparent 100%); }
-.sa-tile > :not(.sa-tile-cover) { position:relative; z-index:1; }
+.sa-tile-cover { position:absolute !important; inset:0; background-size:cover; background-position:center; z-index:0 !important; }
+.sa-tile-cover::after { content:''; position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.2) 55%, transparent 100%); }
+/* fix: не трогаем sa-tile-cover чтобы position:absolute работал */
+.sa-tile-icon,.sa-tile-name,.sa-tile-chars,.sa-tile-active-dot { position:relative; z-index:1; }
 .sa-tile-icon { font-size:1.6rem; line-height:1; margin-top:10px; }
 .sa-tile-name { font-size:0.7rem; color:#fff; line-height:1.3; word-break:break-word; font-weight:600; text-shadow:0 1px 3px rgba(0,0,0,0.8); }
 .sa-tile-chars { display:flex; gap:2px; flex-wrap:wrap; justify-content:center; }
@@ -68,7 +69,7 @@
 .sa-avatar-initial { border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0; font-family:monospace; user-select:none; }
 
 /* Маленькие аватары на тайлах */
-.sa-dot-avatar { width:18px; height:18px; border-radius:50%; object-fit:cover; border:1.5px solid; display:inline-block; }
+.sa-dot-avatar { width:20px; height:20px; border-radius:50%; object-fit:cover; border:2px solid; display:inline-block; vertical-align:middle; flex-shrink:0; }
 .sa-dot-initial { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; border:1.5px solid; font-size:0.55rem; font-weight:700; font-family:monospace; }
 
 /* ── Подвал ───────────────────────────────────────────────── */
@@ -172,10 +173,7 @@ select.sa-sinput option { background:#1e1e1e; }
 .sa-set-btn-active { background:rgba(100,200,120,0.12); border-color:rgba(100,200,120,0.3); color:#86efac; cursor:default; opacity:0.7; }
 
 /* ── Редактор (общий) ─────────────────────────────────────── */
-.sa-editor-inner { display:flex; flex-direction:column; gap:6px; font-family:monospace; min-width:280px; max-height:72vh; overflow-y:auto; padding-right:6px; scroll-behavior:smooth; }
-.sa-editor-inner::-webkit-scrollbar { width:4px; }
-.sa-editor-inner::-webkit-scrollbar-thumb { background:rgba(123,189,232,0.3); border-radius:2px; }
-.sa-editor-inner::-webkit-scrollbar-thumb:hover { background:rgba(123,189,232,0.55); }
+.sa-editor-inner { display:flex; flex-direction:column; gap:6px; font-family:monospace; min-width:280px; }
 .sa-editor-title { font-size:0.85rem; font-weight:700; color:#ddd; margin-bottom:6px; }
 .sa-editor-inner label { font-size:0.68rem; color:#888; text-transform:uppercase; letter-spacing:0.05em; margin-top:4px; }
 .sa-editor-inner input, .sa-editor-inner select, .sa-editor-inner textarea { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); border-radius:4px; color:#ddd; padding:8px 10px; font-family:monospace; font-size:16px; outline:none; transition:border-color 0.15s; resize:vertical; width:100%; box-sizing:border-box; }
@@ -191,22 +189,7 @@ select.sa-sinput option { background:#1e1e1e; }
 .sa-cover-remove { position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:none; background:rgba(0,0,0,0.6); color:#fff; cursor:pointer; font-size:0.75rem; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); transition:background 0.15s; }
 .sa-cover-remove:hover { background:rgba(220,50,50,0.8); }
 
-/* ── Контекст-бар (персонаж / лорбук) ────────────────────── */
-#sa-ctx-bar { display:flex; align-items:center; gap:8px; padding:5px 8px; background:rgba(123,189,232,0.05); border:1px solid rgba(123,189,232,0.12); border-radius:5px; margin-bottom:4px; flex-wrap:wrap; }
-.sa-ctx-item { display:flex; align-items:center; gap:5px; font-size:0.65rem; color:#aaa; }
-.sa-ctx-item strong { color:#ddd; font-weight:600; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sa-ctx-sep { color:rgba(255,255,255,0.15); font-size:0.8rem; }
-.sa-ctx-none { font-size:0.63rem; color:#555; font-style:italic; }
-
-/* ── Модель — строка с кнопкой обновления ────────────────── */
-.sa-model-row { display:flex; gap:5px; align-items:stretch; }
-.sa-model-row .sa-sinput { flex:1; }
-.sa-models-refresh-btn { flex-shrink:0; width:34px; border-radius:4px; border:1px solid rgba(123,189,232,0.3); background:rgba(123,189,232,0.08); color:#7bbde8; cursor:pointer; font-size:0.9rem; transition:all 0.15s; display:flex; align-items:center; justify-content:center; }
-.sa-models-refresh-btn:hover { background:rgba(123,189,232,0.2); }
-.sa-models-refresh-btn.loading { animation:sa-spin 0.8s linear infinite; }
-@keyframes sa-spin { to { transform:rotate(360deg); } }
-.sa-models-select { margin-top:3px; display:none; background:rgba(20,22,35,0.98); border:1px solid rgba(123,189,232,0.35); border-radius:4px; color:#ddd; padding:5px 8px; font-family:monospace; font-size:0.72rem; outline:none; width:100%; box-sizing:border-box; max-height:160px; overflow-y:auto; }
-.sa-models-select option { background:#1a1d2e; padding:4px; }
+/* ── Редактор аватара персонажа ───────────────────────────── */
 .sa-avatar-editor { margin-bottom:4px; }
 .sa-avatar-preview-wrap { display:flex; align-items:center; gap:12px; padding:8px; background:rgba(255,255,255,0.03); border-radius:6px; border:1px solid rgba(255,255,255,0.08); }
 .sa-avatar-btns { display:flex; flex-direction:column; gap:5px; }
@@ -254,3 +237,65 @@ select.sa-sinput option { background:#1e1e1e; }
   .sa-tile:not(.sa-tile-active):hover { border-color:rgba(255,255,255,0.08) !important; }
   .sa-tile-edit-btn { color:rgba(255,255,255,0.4) !important; background:rgba(0,0,0,0.25) !important; }
 }
+/* ── Тост движений (авто-трекинг) ────────────────────────── */
+.sa-move-toast {
+  position: fixed !important;
+  bottom: 28px !important;
+  right: 20px !important;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(10,12,22,0.97) !important;
+  border: 1px solid rgba(123,189,232,0.4) !important;
+  border-radius: 9px !important;
+  padding: 10px 14px !important;
+  font-family: monospace !important;
+  z-index: 2147483646 !important;
+  box-shadow: 0 6px 32px rgba(0,0,0,0.85) !important;
+  max-width: 280px !important;
+  opacity: 0 !important;
+  transform: translateY(12px) !important;
+  transition: opacity 0.25s, transform 0.25s !important;
+  pointer-events: all !important;
+}
+.sa-move-show { opacity: 1 !important; transform: translateY(0) !important; }
+.sa-move-icon { font-size: 1.4rem; flex-shrink: 0; }
+.sa-move-body { flex: 1; min-width: 0; }
+.sa-move-title { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: #7bbde8; margin-bottom: 4px; }
+.sa-move-detail { font-size: 0.78rem; color: #ddd; line-height: 1.5; }
+.sa-move-detail b { color: #7bbde8; }
+.sa-move-btns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.sa-move-btns button { width: 28px; height: 28px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.07); color: #ddd; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; transition: all 0.15s; font-family: monospace; }
+#sa-move-yes { color: #86efac; border-color: rgba(134,239,172,0.3); }
+#sa-move-yes:hover { background: rgba(134,239,172,0.15); }
+#sa-move-no:hover { background: rgba(248,113,113,0.15); color: #f87171; border-color: rgba(248,113,113,0.3); }
+
+/* ── Полный предпросмотр инжекта в настройках ─────────────── */
+.sa-inject-full-preview {
+  background: rgba(123,189,232,0.05);
+  border: 1px solid rgba(123,189,232,0.2);
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-family: monospace;
+  font-size: 0.68rem;
+  color: #9bc8e8;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ── Жилища v1.6 ──────────────────────────────────────────── */
+.sa-homes-wrap { display:flex; flex-direction:column; height:100%; }
+.sa-homes-topbar { display:flex; align-items:center; justify-content:space-between; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.08); margin-bottom:8px; flex-shrink:0; }
+.sa-btn-gen-homes { background:rgba(167,139,250,0.1) !important; border-color:rgba(167,139,250,0.3) !important; color:#a78bfa !important; gap:5px; }
+.sa-btn-gen-homes:hover:not(:disabled) { background:rgba(167,139,250,0.2) !important; }
+.sa-btn-gen-homes:disabled { opacity:0.4; cursor:not-allowed; }
+.sa-home-owner-info { flex:1; min-width:0; }
+.sa-home-owner-loc { font-size:0.64rem; color:#666; margin-top:1px; }
+.sa-home-name-row { display:flex; align-items:flex-start; gap:8px; margin-bottom:6px; }
+.sa-home-icon-big { font-size:1.5rem; flex-shrink:0; line-height:1; }
+.sa-no-home { display:flex; align-items:center; justify-content:space-between; padding:5px 0; }
+.sa-home-gen-one-btn { padding:4px 10px !important; font-size:0.68rem !important; color:#a78bfa !important; border-color:rgba(167,139,250,0.3) !important; }

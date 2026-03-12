@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-//  СораАтлас v1.4
-//  + Фото / инициалы для персонажей
-//  + Фото-обложка для локаций
-//  + Смена обоев ST при смене текущей локации
+//  СораАтлас v1.5
+//  + Умный компактный инжект (локация + жилище + инструкция)
+//  + Авто-трекинг движения персонажей из текста AI
+//  + Поиск персонажей в карточке при генерации
+//  + Хуки на события чата
 // ═══════════════════════════════════════════════════════════
 
 import { extension_settings } from '../../../extensions.js';
@@ -23,6 +24,9 @@ const DEFAULT_SETTINGS = {
   model: 'gpt-4o-mini',
   lang: 'ru',
   autoWallpaper: false,
+  autoTrackMovement: true,
+  injectHome: true,
+  contextMessages: 15,
   worlds: {},
   gen: {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -64,19 +68,6 @@ function getChatId() {
   try { const c = getCtx(); return String(c.chatId || c.characterId || 'default'); } catch { return 'default'; }
 }
 function getUserName() { return getCtx().name1 || 'Пользователь'; }
-
-// ── Активный контекст (персонаж + лорбук) ──
-function getActiveContextInfo() {
-  try {
-    const ctx = getCtx();
-    const char = ctx.characters?.[ctx.characterId];
-    const charName = char?.name || ctx.name2 || null;
-    const loreBookName = char?.data?.extensions?.world
-      || char?.data?.character_book?.name
-      || (ctx.worldInfoString?.trim()?.length ? '(активен)' : null);
-    return { charName, loreBookName };
-  } catch { return { charName: null, loreBookName: null }; }
-}
 
 function getWorld() {
   const s = getSettings(), id = getChatId();
@@ -147,17 +138,36 @@ function showToast(msg, isError = false) {
 //  ЗАГРУЗКА ИЗОБРАЖЕНИЯ → BASE64
 // ══════════════════════════════════════════════════════════
 
-function pickImage(onResult) {
+function pickImage(onResult, maxPx) {
+  maxPx = maxPx || 900; // макс размер стороны
   const inp = document.createElement('input');
   inp.type='file'; inp.accept='image/jpeg,image/png,image/webp,image/gif'; inp.style.display='none';
   document.body.appendChild(inp);
   inp.addEventListener('change', () => {
     const file = inp.files?.[0];
     if (!file) { inp.remove(); return; }
-    if (file.size > 2*1024*1024) { showToast('✗ Файл > 2MB',true); inp.remove(); return; }
+    if (file.size > 10*1024*1024) { showToast('✗ Файл > 10MB',true); inp.remove(); return; }
     const reader = new FileReader();
-    reader.onload = e => { inp.remove(); onResult(e.target.result); };
     reader.onerror = () => { inp.remove(); showToast('✗ Ошибка чтения',true); };
+    reader.onload = e => {
+      inp.remove();
+      // Сжимаем через canvas: resize + JPEG 0.78
+      const img = new Image();
+      img.onerror = () => onResult(e.target.result); // fallback без сжатия
+      img.onload = () => {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxPx || h > maxPx) {
+          if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+          else       { w = Math.round(w * maxPx / h); h = maxPx; }
+        }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        const compressed = c.toDataURL('image/jpeg', 0.78);
+        onResult(compressed);
+      };
+      img.src = e.target.result;
+    };
     reader.readAsDataURL(file);
   });
   inp.click();
@@ -188,23 +198,60 @@ function renderCharAvatarSmall(char) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  ИНЪЕКЦИЯ
+//  УМНЫЙ ИНЖЕКТ
+//  Компактный, 3-5 строк. Содержит инструкцию для AI.
 // ══════════════════════════════════════════════════════════
 
 function buildInjectText(world) {
   if (!world?.locations?.length) return null;
+  const s = getSettings();
   const loc = world.locations.find(l => l.id === world.currentLocationId) || world.locations[0];
   if (!loc) return null;
-  const charsHere = (world.characters||[]).filter(c=>c.locationId===loc.id).map(c=>c.name==='{{user}}'?getUserName():c.name);
-  const exits = (loc.connections||[]).map(cid=>world.locations.find(l=>l.id===cid)?.name).filter(Boolean);
-  return '[ЛОКАЦИЯ — ' + [
-    `📍${loc.name}`,
-    loc.atmosphere ? `Атмосфера: ${loc.atmosphere}` : null,
-    loc.items?.length ? `Убранство: ${loc.items.slice(0,5).join(', ')}` : null,
-    charsHere.length ? `Здесь: ${charsHere.join(', ')}` : null,
-    loc.visitableNpcs?.length ? `Можно встретить: ${loc.visitableNpcs.join(', ')}` : null,
-    exits.length ? `Переходы: ${exits.join(', ')}` : null,
-  ].filter(Boolean).join(' | ') + ']';
+
+  const lines = [];
+
+  // ── Строка 1: Текущая локация ─────────────────────────
+  const charsHere = (world.characters || [])
+    .filter(c => c.locationId === loc.id)
+    .map(c => c.name === '{{user}}' ? getUserName() : c.name);
+  const exits = (loc.connections || [])
+    .map(cid => world.locations.find(l => l.id === cid)?.name).filter(Boolean);
+
+  const p = [`📍 ${loc.name}`];
+  if (loc.atmosphere)        p.push(`«${loc.atmosphere}»`);
+  if (loc.items?.length)     p.push(`[${loc.items.slice(0,4).join(', ')}]`);
+  if (charsHere.length)      p.push(`Здесь: ${charsHere.join(', ')}`);
+  if (loc.visitableNpcs?.length) p.push(`Встретить: ${loc.visitableNpcs.join(', ')}`);
+  if (exits.length)          p.push(`→ ${exits.join(' / ')}`);
+  lines.push(`[ЛОКАЦИЯ: ${p.join(' | ')}]`);
+
+  // ── Строка 2: Где остальные персонажи ─────────────────
+  const elsewhere = (world.characters || [])
+    .filter(c => c.locationId && c.locationId !== loc.id)
+    .map(c => {
+      const ln = world.locations.find(l => l.id === c.locationId)?.name || '?';
+      return `${c.name === '{{user}}' ? getUserName() : c.name}→${ln}`;
+    });
+  if (elsewhere.length) lines.push(`[ДРУГИЕ: ${elsewhere.join(' | ')}]`);
+
+  // ── Строка 3: Жилище если персонаж дома ───────────────
+  if (s.injectHome) {
+    for (const owner of (world.characters || []).filter(c => c.home && c.locationId === loc.id)) {
+      const h = owner.home;
+      if (!h?.rooms?.length) continue;
+      const oName = owner.name === '{{user}}' ? getUserName() : owner.name;
+      const rList = h.rooms.map(r => {
+        const itms = r.items?.length ? `(${r.items.slice(0,3).join(', ')})` : '';
+        return `${r.icon||''}${r.name}${itms}`;
+      }).join(', ');
+      lines.push(`[ЖИЛИЩЕ ${oName}: ${h.name || 'дом'} — ${rList}]`);
+    }
+  }
+
+  // ── Строка 4: Инструкция для AI ───────────────────────
+  lines.push(`[КАРТА-ИНСТРУКЦИЯ: Учитывай эту локацию при описании сцены — её предметы, атмосферу, присутствующих персонажей. При переходе в другое место описывай его детали.]`);
+
+  return lines.join('\n');
 }
 
 function onBeforeCombinePrompts(chat) {
@@ -213,6 +260,186 @@ function onBeforeCombinePrompts(chat) {
   if (!inject) return;
   const arr = Array.isArray(chat) ? chat : (chat?.chat ?? null);
   if (arr) arr.splice(1, 0, { role:'system', content:inject });
+}
+
+// ══════════════════════════════════════════════════════════
+//  АВТО-ТРЕКИНГ ДВИЖЕНИЯ ИЗ ТЕКСТА AI
+//  Парсит ответы на глаголы движения → предлагает обновить карту
+// ══════════════════════════════════════════════════════════
+
+const MOVE_VERB_PATTERN = [
+  'вош(?:ёл|ла|ли|ел)',
+  'при(?:шёл|шла|шли|йти|дёт|дёшь)',
+  'перешёл|перешла|перешли',
+  'направил(?:а|и|ся|ась|ись)?(?:с[яь])?',
+  'оказал(?:а|и)?с[яь]',
+  'переместил(?:а|и)?с[яь]',
+  'двинул(?:а|и)?с[яь]',
+  'прошёл|прошла|прошли',
+  'зашёл|зашла|зашли',
+  'пошёл|пошла|пошли',
+  'отправил(?:а|и)?с[яь]',
+  'появил(?:а|и)?с[яь]',
+  'вернул(?:а|и)?с[яь]',
+  'поднял(?:а|и)?с[яь]',
+  'спустил(?:а|и)?с[яь]',
+  'ушёл|ушла|ушли',
+  'вышел|вышла|вышли',
+].join('|');
+
+function rxEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function detectMovements(text, world) {
+  if (!text || !world?.locations?.length || !world?.characters?.length) return [];
+
+  const chars = (world.characters || []).filter(c => {
+    const n = c.name === '{{user}}' ? getUserName() : c.name;
+    return n && n.length > 1;
+  });
+  const locNames = world.locations.map(l => l.name).filter(n => n && n.length > 1);
+  if (!chars.length || !locNames.length) return [];
+
+  const moves = [];
+  const locsRx = locNames.map(rxEsc).join('|');
+
+  for (const char of chars) {
+    const charName = char.name === '{{user}}' ? getUserName() : char.name;
+    const nameRx = rxEsc(charName);
+    // Паттерн: [Имя] ... глагол ... (в|на|к) ... [Локация]  в пределах 120 символов
+    const rx = new RegExp(
+      `${nameRx}[^.!?\\n]{0,80}(?:${MOVE_VERB_PATTERN})[^.!?\\n]{0,25}(?:в|на|к|до)\\s+(${locsRx})`,
+      'iu'
+    );
+    const m = rx.exec(text);
+    if (m) {
+      const locName = m[1];
+      const loc = world.locations.find(l => l.name.toLowerCase() === locName.toLowerCase());
+      if (loc && loc.id !== char.locationId) {
+        moves.push({ charId: char.id, charName, locId: loc.id, locName: loc.name });
+      }
+    }
+  }
+  return moves;
+}
+
+// Тост подтверждения движений
+let _pendingMoves = [];
+function showMovementToast(moves, world) {
+  if (!moves.length) return;
+  _pendingMoves = moves;
+  document.getElementById('sa-move-toast')?.remove();
+
+  const el = document.createElement('div');
+  el.id = 'sa-move-toast';
+  el.className = 'sa-move-toast';
+  const moveLine = moves.map(m => `<b>${m.charName}</b> → ${m.locName}`).join('<br>');
+  el.innerHTML = `<div class="sa-move-icon">🚶</div>
+    <div class="sa-move-body"><div class="sa-move-title">Обновить карту?</div><div class="sa-move-detail">${moveLine}</div></div>
+    <div class="sa-move-btns"><button id="sa-move-yes">✓</button><button id="sa-move-no">✕</button></div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('sa-move-show'));
+
+  el.querySelector('#sa-move-yes')?.addEventListener('click', () => {
+    const w = getWorld();
+    _pendingMoves.forEach(mv => { const c = w.characters.find(c=>c.id===mv.charId); if(c) c.locationId=mv.locId; });
+    saveWorld(w); applyLocationWallpaper(w);
+    const prev = document.getElementById('sa-inject-preview');
+    if (prev) prev.textContent = buildInjectText(w) || '';
+    showToast('✓ Карта обновлена');
+    _pendingMoves = [];
+    el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(), 300);
+  });
+  el.querySelector('#sa-move-no')?.addEventListener('click', () => {
+    el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(), 300);
+  });
+  setTimeout(() => { if (document.body.contains(el)) { el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(),300); } }, 9000);
+}
+
+function onCharacterMessageRendered(data) {
+  const s = getSettings();
+  if (!s.enabled || !s.autoTrackMovement) return;
+  const world = getWorld();
+  if (!world?.locations?.length) return;
+
+  // Авто-синхронизируем юзера к текущей локации если у него нет позиции
+  syncUserToCurrentLocation(world);
+
+  // Читаем последние N сообщений ТОЛЬКО от AI (не от юзера)
+  const n = s.contextMessages || 15;
+  let text = '';
+  try {
+    const ctx = getCtx();
+    const chat = ctx.chat || [];
+    // Берём только AI-сообщения (is_user === false)
+    const aiMessages = chat.filter(m => !m.is_user && !m.is_system).slice(-n);
+    text = aiMessages.map(m => m.mes || '').join('\n');
+
+    // Fallback — DOM последнего рендеренного сообщения
+    if (!text) {
+      const msgId = typeof data === 'object' ? data?.messageId : data;
+      if (msgId != null) {
+        const el = document.querySelector(`[mesid="${msgId}"] .mes_text`);
+        text = el?.innerText || el?.textContent || '';
+      }
+    }
+  } catch {}
+
+  if (!text) return;
+  const moves = detectMovements(text, world);
+  if (moves.length) showMovementToast(moves, world);
+}
+
+// Юзер всегда должен быть в текущей локации если у него нет позиции
+function syncUserToCurrentLocation(world) {
+  if (!world?.characters || !world?.currentLocationId) return false;
+  const user = world.characters.find(c => c.id === 'u_user');
+  if (user && !user.locationId) {
+    user.locationId = world.currentLocationId;
+    saveWorld(world);
+    return true;
+  }
+  return false;
+}
+
+// ══════════════════════════════════════════════════════════
+//  ИЗВЛЕЧЕНИЕ ПЕРСОНАЖЕЙ ИЗ КАРТОЧКИ
+//  Сканирует description/first_mes на имена собственные (рус.)
+// ══════════════════════════════════════════════════════════
+
+const COMMON_WORDS = new Set([
+  'Это','Она','Он','Они','Нет','Да','Как','Что','Где','Когда','Почему',
+  'Хорошо','Конечно','Можно','Нельзя','Всё','Ладно','Ничего','Подожди',
+  'Послушай','Скажи','Понял','Поняла','Знаю','Знаешь','Думаю','Просто',
+  'Только','Тогда','Значит','Кстати','Стоп','Нет','Нам','Вам','Ему','Ей',
+]);
+
+function extractCharactersFromCard(ctx) {
+  const char = ctx.characters?.[ctx.characterId];
+  if (!char) return [];
+  const text = [char.description, char.personality, char.scenario, char.first_mes, char.mes_example].filter(Boolean).join('\n');
+  const found = [];
+
+  // Имена после слов-указателей отношений
+  const relRx = /(?:её|его|мою?|твою?|свою?)\s+(?:сестр[уаы]|брат[ау]?|маму?|папу?|друга?|подруг[иу]?|соседк[уи]?|соседа?|тёт[кую]?|дяд[ею]?|бабушк[иу]?|дедушк[уи]?)\s+([А-ЯЁ][а-яёА-ЯЁ]{1,})/gu;
+  let m;
+  while ((m = relRx.exec(text)) !== null) {
+    const n = m[1]; if (!found.includes(n) && n !== char.name) found.push(n);
+  }
+
+  // Прямые обращения в диалогах: «— Имя,» или «Имя!»
+  const dialogRx = /[-—]\s*([А-ЯЁ][а-яё]{2,})(?:[,!]|\s+(?:скажи|послушай|подожди|смотри|погоди))/gu;
+  while ((m = dialogRx.exec(text)) !== null) {
+    const n = m[1]; if (!found.includes(n) && n !== char.name && !COMMON_WORDS.has(n)) found.push(n);
+  }
+
+  // Теги {{name}} и [[name]]
+  const tagRx = /(?:\[\[|\{\{)([А-ЯЁа-яё][а-яёА-ЯЁ]{2,})(?:\]\]|\}\})/gu;
+  while ((m = tagRx.exec(text)) !== null) {
+    const n = m[1][0].toUpperCase() + m[1].slice(1);
+    if (!found.includes(n) && n.toLowerCase() !== 'user' && n.toLowerCase() !== 'char') found.push(n);
+  }
+
+  return found.slice(0, 8);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -230,15 +457,65 @@ async function generateWorld() {
   let wi='';
   if (gen.includeLorebook) try { wi=(ctx.worldInfoString||'').slice(0,2000); } catch{}
 
-  const charBlock=gen.includeCard?`CHARACTER: ${char.name||'Unknown'}\nDescription: ${(char.description||'').slice(0,600)}\nPersonality: ${(char.personality||'').slice(0,300)}\nScenario: ${(char.scenario||'').slice(0,400)}\nFirst message: ${(char.first_mes||'').slice(0,400)}`:'';
-  const prompt=`${charBlock}\nLOREBOOK: ${wi||'(none)'}\nCreate ${locMin}-${locMax||locMin} interconnected locations.${gen.generateNpcs?` Generate ${gen.npcCount||3} named NPCs.`:''} ${gen.includeUser?`Include "${userName}" as user.`:''} ${gen.userWish?.trim()?`\nADDITIONAL: ${gen.userWish}`:''}\nRespond in ${lang}. Return ONLY valid JSON:\n{\n  "worldDescription":"...",\n  "locations":[{"id":"loc_1","name":"...","icon":"🏠","description":"...","atmosphere":"...","items":["item"],"connections":["loc_2"],"visitableNpcs":["NPC"],"isDefault":true}],\n  "characters":[{"name":"CharName","icon":"🧑","type":"main","locationId":"loc_1","color":"#7bbde8"}${gen.includeUser?`,{"name":"${userName}","icon":"🧑","type":"user","locationId":"loc_1","color":"#a78bfa"}`:''}]\n}`;
+  // Извлекаем персонажей из карточки
+  const cardChars = extractCharactersFromCard(ctx);
+  const cardCharsBlock = cardChars.length
+    ? `\nKNOWN NPCs FROM CHARACTER CARD: ${cardChars.join(', ')} — include these as characters with appropriate types and locations.`
+    : '';
 
-  const resp = await fetch(`${s.api_url.replace(/\/+$/,'')}/chat/completions`,{
-    method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${s.api_key}`},
-    body:JSON.stringify({model:s.model,temperature:0.85,max_tokens:4000,messages:[{role:'system',content:gen.systemPrompt||DEFAULT_SYSTEM_PROMPT},{role:'user',content:prompt}]}),
+  const charBlock = gen.includeCard ? `CHARACTER: ${char.name||'Unknown'}
+Description: ${(char.description||'').slice(0,600)}
+Personality: ${(char.personality||'').slice(0,300)}
+Scenario: ${(char.scenario||'').slice(0,400)}
+First message: ${(char.first_mes||'').slice(0,400)}` : '';
+
+  const prompt = `${charBlock}
+LOREBOOK: ${wi||'(none)'}${cardCharsBlock}
+
+Create ${locMin}-${locMax||locMin} interconnected locations for this story.
+${gen.generateNpcs ? `Also generate ${gen.npcCount||3} additional named NPCs beyond those already in the card.` : ''}
+${gen.includeUser ? `Include "${userName}" as the player character (type "user").` : ''}
+${gen.userWish?.trim() ? `\nADDITIONAL REQUIREMENTS: ${gen.userWish}` : ''}
+
+Rules:
+- The main character (${char.name}) should be type "main"
+- Characters found in the card description should be type "main" or "npc" based on importance
+- Each character should start at a logical location based on their role
+- visitableNpcs on locations = background characters who might be encountered there
+
+Respond in ${lang}. Return ONLY valid JSON:
+{
+  "worldDescription": "1-2 sentence world overview",
+  "locations": [
+    {
+      "id": "loc_1",
+      "name": "...",
+      "icon": "🏠",
+      "description": "2-3 sensory sentences",
+      "atmosphere": "1 evocative sentence",
+      "items": ["item", "item", "item"],
+      "connections": ["loc_2"],
+      "visitableNpcs": ["background NPC name"],
+      "isDefault": true
+    }
+  ],
+  "characters": [
+    {"name": "${char.name}", "icon": "🧑", "type": "main", "locationId": "loc_1", "color": "#7bbde8"}${gen.includeUser ? `,\n    {"name": "${userName}", "icon": "🧑", "type": "user", "locationId": "loc_1", "color": "#a78bfa"}` : ''}
+  ]
+}`;
+
+  const resp = await fetch(`${s.api_url.replace(/\/+$/,'')}/chat/completions`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':`Bearer ${s.api_key}`},
+    body:JSON.stringify({model:s.model,temperature:0.85,max_tokens:4000,messages:[
+      {role:'system',content:gen.systemPrompt||DEFAULT_SYSTEM_PROMPT},
+      {role:'user',content:prompt}
+    ]}),
   });
   if (!resp.ok) throw new Error(`API ${resp.status}: ${(await resp.text().catch(()=>'')).slice(0,180)}`);
-  const data=await resp.json(), rawText=data.choices?.[0]?.message?.content||'', match=rawText.match(/\{[\s\S]*\}/);
+  const data=await resp.json();
+  const rawText=data.choices?.[0]?.message?.content||'';
+  const match=rawText.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('API вернул некорректный JSON');
   const raw=JSON.parse(match[0]);
   if (!Array.isArray(raw.locations)||!raw.locations.length) throw new Error('Список локаций пуст');
@@ -246,20 +523,90 @@ async function generateWorld() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  СПИСОК МОДЕЛЕЙ
+//  ГЕНЕРАЦИЯ ЖИЛИЩ
+//  Для каждого персонажа типа user/main генерирует дом + комнаты
 // ══════════════════════════════════════════════════════════
 
-async function fetchModels() {
-  const s = getSettings();
-  if (!s.api_url) throw new Error('API URL не задан');
-  const resp = await fetch(`${s.api_url.replace(/\/+$/, '')}/models`, {
-    headers: { 'Authorization': `Bearer ${s.api_key || ''}`, 'Content-Type': 'application/json' },
+async function generateHomes(charIds) {
+  const s = getSettings(), gen = s.gen;
+  if (!s.api_key) throw new Error('API ключ не задан — откройте ⚙️');
+  const world = getWorld();
+  const ctx = getCtx();
+  const char = ctx.characters?.[ctx.characterId];
+  const lang = s.lang === 'ru' ? 'Russian' : 'English';
+
+  // Персонажи для генерации (user + main, или конкретные)
+  const targets = (world.characters || []).filter(c =>
+    (c.type === 'user' || c.type === 'main') &&
+    (!charIds || charIds.includes(c.id))
+  );
+  if (!targets.length) throw new Error('Нет персонажей типа «юзер» или «главный»');
+
+  const charInfo = targets.map(c => {
+    const n = c.name === '{{user}}' ? (ctx.name1 || 'User') : c.name;
+    return `- ${n} (${c.type}, сейчас в: ${world.locations.find(l=>l.id===c.locationId)?.name||'неизвестно'})`;
+  }).join('\n');
+
+  const charBlock = gen.includeCard && char ? `
+MAIN CHARACTER CARD: ${char.name}
+Description: ${(char.description||'').slice(0,500)}
+Scenario: ${(char.scenario||'').slice(0,300)}` : '';
+
+  const prompt = `${charBlock}
+STORY WORLD: ${world.worldDescription || '(roleplay world)'}
+EXISTING LOCATIONS: ${world.locations.map(l=>l.name).join(', ')}
+
+CHARACTERS NEEDING HOMES:
+${charInfo}
+
+For each character, create a personal home/residence that fits their personality and role in the story.
+Each home should have 3-5 rooms with evocative names and items.
+Respond in ${lang}. Return ONLY valid JSON:
+{
+  "homes": [
+    {
+      "characterName": "Name",
+      "home": {
+        "icon": "🏠",
+        "name": "Apartment name",
+        "description": "2 sentences about the home",
+        "rooms": [
+          {
+            "icon": "🛋️",
+            "name": "Room name",
+            "description": "Brief sensory description",
+            "items": ["item1", "item2", "item3"]
+          }
+        ]
+      }
+    }
+  ]
+}`;
+
+  const resp = await fetch(`${s.api_url.replace(/\/+$/,'')}/chat/completions`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','Authorization':`Bearer ${s.api_key}`},
+    body: JSON.stringify({
+      model: s.model, temperature: 0.85, max_tokens: 3000,
+      messages: [
+        {role:'system', content: gen.systemPrompt || DEFAULT_SYSTEM_PROMPT},
+        {role:'user', content: prompt}
+      ]
+    }),
   });
-  if (!resp.ok) throw new Error(`API ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 120)}`);
+  if (!resp.ok) throw new Error(`API ${resp.status}: ${(await resp.text().catch(()=>'')).slice(0,180)}`);
   const data = await resp.json();
-  const list = data.data || data.models || [];
-  return list.map(m => (typeof m === 'string' ? m : (m.id || m.name || ''))).filter(Boolean).sort();
+  const rawText = data.choices?.[0]?.message?.content || '';
+  const match = rawText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('API вернул некорректный JSON');
+  const raw = JSON.parse(match[0]);
+  if (!Array.isArray(raw.homes) || !raw.homes.length) throw new Error('Список жилищ пуст');
+  return { homes: raw.homes, targets };
 }
+
+
+// ══════════════════════════════════════════════════════════
+//  КОНСТАНТЫ
 // ══════════════════════════════════════════════════════════
 
 function saEsc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -281,15 +628,6 @@ let _activeTab='map';
 //  ГЛАВНЫЙ HTML
 // ══════════════════════════════════════════════════════════
 
-function buildCtxBar() {
-  const { charName, loreBookName } = getActiveContextInfo();
-  if (!charName && !loreBookName) return '';
-  const charHtml = charName ? `<span class="sa-ctx-item">👤&nbsp;<strong title="${saEsc(charName)}">${saEsc(charName)}</strong></span>` : '';
-  const sep = charName && loreBookName ? `<span class="sa-ctx-sep">|</span>` : '';
-  const loreHtml = loreBookName ? `<span class="sa-ctx-item">📖&nbsp;<strong title="${saEsc(loreBookName)}">${saEsc(loreBookName)}</strong></span>` : '';
-  return `<div id="sa-ctx-bar">${charHtml}${sep}${loreHtml}</div>`;
-}
-
 function buildMainHTML() {
   const world=getWorld(), s=getSettings(), has=world.locations?.length>0;
   const tp=(t)=>_activeTab===t;
@@ -302,7 +640,6 @@ function buildMainHTML() {
       <button class="sa-head-btn" id="sa-btn-clear" ${!has?'disabled':''} title="Удалить карту"><i class="fa-solid fa-trash-can"></i></button>
     </div>
   </div>
-  ${buildCtxBar()}
   <div id="sa-tabs">
     <button class="sa-tab ${tp('map')?'sa-tab-on':''}" data-tab="map">🗺️ Карта</button>
     <button class="sa-tab ${tp('chars')?'sa-tab-on':''}" data-tab="chars">👥 Персонажи</button>
@@ -364,25 +701,56 @@ function buildCharsTab(world) {
 
 function buildHomesTab(world) {
   const hc=(world.characters||[]).filter(c=>c.type==='user'||c.type==='main');
-  if (!hc.length) return `<div class="sa-empty"><div class="sa-empty-icon">🏠</div><div class="sa-empty-title">Нет персонажей с жилищем</div><div class="sa-empty-hint">Добавьте персонажей типа «юзер» или «главный»</div></div>`;
-  return `<div class="sa-homes-list">${hc.map(c=>{
+  const hasHomes = hc.some(c=>c.home);
+  return `<div class="sa-homes-wrap">
+  <div class="sa-homes-topbar">
+    <span class="sa-section-lbl">Жилища (${hc.filter(c=>c.home).length}/${hc.length})</span>
+    <button class="sa-small-btn sa-btn-gen-homes" id="sa-btn-gen-homes" ${!hc.length?'disabled':''}>
+      <i class="fa-solid fa-wand-sparkles"></i> Сгенерировать
+    </button>
+  </div>
+  ${!hc.length
+    ? `<div class="sa-empty"><div class="sa-empty-icon">🏠</div><div class="sa-empty-title">Нет персонажей</div><div class="sa-empty-hint">Добавьте персонажей типа «юзер» или «главный» на вкладке 👥</div></div>`
+    : `<div class="sa-homes-list">${hc.map(c=>{
     const dn=c.name==='{{user}}'?getUserName():c.name, home=c.home||null;
+    // Показываем где персонаж сейчас
+    const locNow = world.locations.find(l=>l.id===c.locationId);
+    const isHome = home && c.locationId === c.locationId; // всегда true, просто для наглядности
     return `<div class="sa-home-card">
-      <div class="sa-home-header">${renderCharAvatar(c,30)}<div class="sa-home-owner-name">${saEsc(dn)}</div>
-        <button class="sa-home-edit-btn" data-charid="${saEsc(c.id)}">${home?'<i class="fa-solid fa-pen"></i>':'<i class="fa-solid fa-plus"></i> Добавить'}</button>
+      <div class="sa-home-header">
+        ${renderCharAvatar(c,32)}
+        <div class="sa-home-owner-info">
+          <div class="sa-home-owner-name">${saEsc(dn)}</div>
+          <div class="sa-home-owner-loc">${locNow ? `📍 ${saEsc(locNow.name)}` : '<span class="sa-dim">—</span>'}</div>
+        </div>
+        <button class="sa-home-edit-btn" data-charid="${saEsc(c.id)}">${home?'<i class="fa-solid fa-pen"></i>':'<i class="fa-solid fa-plus"></i>'}</button>
       </div>
-      ${home?`<div class="sa-home-name">${home.icon||'🏠'} ${saEsc(home.name||'Жилище')}</div>
-      ${home.description?`<div class="sa-home-desc">${saEsc(home.description)}</div>`:''}
-      <div class="sa-rooms-label">Комнаты (${(home.rooms||[]).length}):</div>
-      <div class="sa-rooms-grid">${(home.rooms||[]).map(r=>`<div class="sa-room-tile">
-        <button class="sa-room-edit-btn" data-charid="${saEsc(c.id)}" data-roomid="${saEsc(r.id)}"><i class="fa-solid fa-pen"></i></button>
-        <div class="sa-room-icon">${r.icon||'🚪'}</div><div class="sa-room-name">${saEsc(r.name)}</div>
-        ${r.items?.length?`<div class="sa-room-items">${r.items.slice(0,2).map(i=>`<span class="sa-badge">${saEsc(i)}</span>`).join('')}</div>`:''}
-      </div>`).join('')}<button class="sa-add-room-btn" data-charid="${saEsc(c.id)}"><i class="fa-solid fa-plus"></i></button></div>`
-      :`<div class="sa-dim" style="padding:6px 0;font-size:0.72rem">Жилище не добавлено</div>`}
+      ${home
+        ?`<div class="sa-home-name-row">
+          <span class="sa-home-icon-big">${home.icon||'🏠'}</span>
+          <div><div class="sa-home-name">${saEsc(home.name||'Жилище')}</div>
+          ${home.description?`<div class="sa-home-desc">${saEsc(home.description)}</div>`:''}
+          </div>
+        </div>
+        <div class="sa-rooms-label">Комнаты <span class="sa-dim">(${(home.rooms||[]).length})</span></div>
+        <div class="sa-rooms-grid">
+          ${(home.rooms||[]).map(r=>`<div class="sa-room-tile">
+            <button class="sa-room-edit-btn" data-charid="${saEsc(c.id)}" data-roomid="${saEsc(r.id)}"><i class="fa-solid fa-pen"></i></button>
+            <div class="sa-room-icon">${r.icon||'🚪'}</div>
+            <div class="sa-room-name">${saEsc(r.name)}</div>
+            ${r.items?.length?`<div class="sa-room-items">${r.items.slice(0,2).map(i=>`<span class="sa-badge">${saEsc(i)}</span>`).join('')}</div>`:''}
+          </div>`).join('')}
+          <button class="sa-add-room-btn" data-charid="${saEsc(c.id)}" title="Добавить комнату"><i class="fa-solid fa-plus"></i></button>
+        </div>`
+        :`<div class="sa-no-home">
+          <span class="sa-dim">Жилище не добавлено</span>
+          <button class="sa-home-gen-one-btn sa-small-btn" data-charid="${saEsc(c.id)}"><i class="fa-solid fa-wand-sparkles"></i></button>
+         </div>`}
     </div>`;
-  }).join('')}</div>`;
+  }).join('')}</div>`}
+</div>`;
 }
+
 
 function buildSettingsTab() {
   const s=getSettings(), gen=s.gen;
@@ -395,25 +763,38 @@ function buildSettingsTab() {
       <div class="sa-key-status">${s.api_key?'<span class="sa-key-ok">✓ ключ задан</span>':'<span class="sa-key-empty">ключ не задан</span>'}</div>
     </div>
     <div class="sa-row-2">
-      <div class="sa-sfield"><label>Модель</label>
-        <div class="sa-model-row">
-          <input id="sa-s-model" type="text" class="sa-sinput" placeholder="gpt-4o-mini" value="${saEsc(s.model||'')}">
-          <button class="sa-models-refresh-btn" id="sa-models-refresh" title="Загрузить список моделей с прокси">↻</button>
-        </div>
-        <select id="sa-models-select" class="sa-models-select"><option value="">— выберите модель —</option></select>
-      </div>
+      <div class="sa-sfield"><label>Модель</label><input id="sa-s-model" type="text" class="sa-sinput" placeholder="gpt-4o-mini" value="${saEsc(s.model||'')}"></div>
       <div class="sa-sfield"><label>Язык</label><select id="sa-s-lang" class="sa-sinput"><option value="ru" ${s.lang==='ru'?'selected':''}>Русский</option><option value="en" ${s.lang==='en'?'selected':''}>English</option></select></div>
     </div>
   </div>
   <div class="sa-settings-section">
-    <div class="sa-settings-section-title">🖼️ Обои</div>
-    <label class="sa-chk-label" style="width:100%;box-sizing:border-box">
-      <input type="checkbox" id="sa-auto-wallpaper" ${s.autoWallpaper?'checked':''}> Менять обои ST при смене локации
-    </label>
-    <div class="sa-dim" style="font-size:0.68rem;margin-top:5px;line-height:1.6">Обложка локации станет фоном ST. Добавить обложку можно в редакторе каждой локации (<i class="fa-solid fa-pen" style="font-size:0.6rem"></i> на тайле).</div>
+    <div class="sa-settings-section-title">⚡ Поведение</div>
+    <div style="display:flex;flex-direction:column;gap:7px">
+      <label class="sa-chk-label" style="width:100%;box-sizing:border-box">
+        <input type="checkbox" id="sa-auto-wallpaper" ${s.autoWallpaper?'checked':''}>
+        <div><div style="font-size:0.78rem">🖼️ Менять обои ST при смене локации</div><div class="sa-hint">Обложка локации становится фоном ST</div></div>
+      </label>
+      <label class="sa-chk-label" style="width:100%;box-sizing:border-box">
+        <input type="checkbox" id="sa-auto-track" ${s.autoTrackMovement?'checked':''}>
+        <div><div style="font-size:0.78rem">🚶 Авто-трекинг движений</div><div class="sa-hint">Когда AI описывает переход — предложить обновить карту</div></div>
+      </label>
+      <label class="sa-chk-label" style="width:100%;box-sizing:border-box">
+        <input type="checkbox" id="sa-inject-home" ${s.injectHome?'checked':''}>
+        <div><div style="font-size:0.78rem">🏠 Жилище в инжекте</div><div class="sa-hint">Если персонаж дома — AI знает его комнаты и обстановку</div></div>
+      </label>
+    </div>
+    <div class="sa-sfield" style="margin-top:8px">
+      <label>📖 Читать последних сообщений <span class="sa-hint">для трекинга движений</span></label>
+      <input id="sa-ctx-messages" type="number" class="sa-sinput" min="1" max="50" value="${s.contextMessages||15}" style="width:80px">
+    </div>
   </div>
   <div class="sa-settings-section">
-    <div class="sa-settings-section-title">🤖 Системный промпт</div>
+    <div class="sa-settings-section-title">👁 Предпросмотр инжекта</div>
+    <pre class="sa-inject-full-preview">${saEsc(buildInjectText(getWorld())||'— мир не создан')}</pre>
+    <div class="sa-dim" style="font-size:0.65rem;margin-top:4px">Это вставляется системным сообщением перед каждым ответом AI</div>
+  </div>
+  <div class="sa-settings-section">
+    <div class="sa-settings-section-title">🤖 Системный промпт генерации</div>
     <textarea id="sa-gen-sysprompt" class="sa-sinput" rows="4" style="resize:vertical">${saEsc(gen.systemPrompt||DEFAULT_SYSTEM_PROMPT)}</textarea>
     <button class="sa-small-btn" id="sa-reset-sysprompt" style="margin-top:4px">↩ Сбросить</button>
   </div>
@@ -421,20 +802,21 @@ function buildSettingsTab() {
     <div class="sa-settings-section-title">🌍 Параметры генерации</div>
     <div class="sa-row-2">
       <div class="sa-sfield"><label>Локаций</label><input id="sa-gen-loccount" type="text" class="sa-sinput" placeholder="4-7" value="${saEsc(gen.locationCount||'4-7')}"></div>
-      <div class="sa-sfield"><label>НПС</label><input id="sa-gen-npccount" type="number" class="sa-sinput" min="0" max="10" value="${gen.npcCount||3}"></div>
+      <div class="sa-sfield"><label>НПС доп.</label><input id="sa-gen-npccount" type="number" class="sa-sinput" min="0" max="10" value="${gen.npcCount||3}"></div>
     </div>
     <div class="sa-checkboxes">
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-card" ${gen.includeCard?'checked':''}> Карточка</label>
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-lorebook" ${gen.includeLorebook?'checked':''}> Лорбук</label>
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-user" ${gen.includeUser?'checked':''}> {{user}}</label>
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-npcs" ${gen.generateNpcs?'checked':''}> НПС</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-card" ${gen.includeCard?'checked':''}}> Карточка</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-lorebook" ${gen.includeLorebook?'checked':''}}> Лорбук</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-user" ${gen.includeUser?'checked':''}}> {{user}}</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-npcs" ${gen.generateNpcs?'checked':''}}> Доп. НПС</label>
     </div>
     <div class="sa-sfield" style="margin-top:8px"><label>Пожелания <span class="sa-hint">добавляются к запросу</span></label>
-      <textarea id="sa-gen-wish" class="sa-sinput" rows="2" placeholder="тёмное фэнтези, маленький городок...">${saEsc(gen.userWish||'')}</textarea>
+      <textarea id="sa-gen-wish" class="sa-sinput" rows="2" placeholder="тёмное фэнтези, маленький городок...">${saEsc(gen.userWish||'')}}</textarea>
     </div>
   </div>
 </div>`;
 }
+
 
 // ══════════════════════════════════════════════════════════
 //  ДЕТАЛИ ЛОКАЦИИ
@@ -743,6 +1125,71 @@ function bindMainEvents() {
   document.querySelectorAll('.sa-home-edit-btn').forEach(btn=>{btn.addEventListener('click',()=>openHomeEditorPopup(btn.dataset.charid));});
   document.querySelectorAll('.sa-add-room-btn').forEach(btn=>{btn.addEventListener('click',()=>openRoomEditorPopup(btn.dataset.charid,null));});
   document.querySelectorAll('.sa-room-edit-btn').forEach(btn=>{btn.addEventListener('click',()=>openRoomEditorPopup(btn.dataset.charid,btn.dataset.roomid));});
+
+  // Генерация жилищ — все сразу
+  document.getElementById('sa-btn-gen-homes')?.addEventListener('click', async () => {
+    const btn = document.getElementById('sa-btn-gen-homes');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    showToast('⏳ Генерирую жилища...');
+    try {
+      const { homes, targets } = await generateHomes();
+      const world = getWorld();
+      for (const h of homes) {
+        const char = targets.find(c => {
+          const n = c.name === '{{user}}' ? getUserName() : c.name;
+          return n.toLowerCase() === h.characterName?.toLowerCase();
+        });
+        if (char && h.home) {
+          const rooms = (h.home.rooms || []).map((r, i) => ({
+            id: `room_${Date.now()}_${i}`,
+            icon: r.icon || '🚪',
+            name: r.name || 'Комната',
+            description: r.description || '',
+            items: r.items || [],
+          }));
+          char.home = {
+            icon: h.home.icon || '🏠',
+            name: h.home.name || 'Дом',
+            description: h.home.description || '',
+            rooms,
+          };
+        }
+      }
+      saveWorld(world);
+      showToast(`✓ Жилища сгенерированы (${homes.length})`);
+      refreshMain();
+    } catch(e) {
+      console.error('[СораАтлас homes]', e);
+      showToast(`✗ ${e.message}`, true);
+    } finally {
+      const b = document.getElementById('sa-btn-gen-homes');
+      if (b) { b.disabled = false; b.innerHTML = '<i class="fa-solid fa-wand-sparkles"></i> Сгенерировать'; }
+    }
+  });
+
+  // Генерация жилища для одного персонажа
+  document.querySelectorAll('.sa-home-gen-one-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      try {
+        const { homes, targets } = await generateHomes([btn.dataset.charid]);
+        const world = getWorld();
+        for (const h of homes) {
+          const char = targets.find(c => c.id === btn.dataset.charid);
+          if (char && h.home) {
+            char.home = {
+              icon: h.home.icon || '🏠',
+              name: h.home.name || 'Дом',
+              description: h.home.description || '',
+              rooms: (h.home.rooms||[]).map((r,i) => ({id:`room_${Date.now()}_${i}`,icon:r.icon||'🚪',name:r.name||'Комната',description:r.description||'',items:r.items||[]})),
+            };
+          }
+        }
+        saveWorld(world); showToast('✓ Жилище создано'); refreshMain();
+      } catch(e) { showToast(`✗ ${e.message}`, true); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-wand-sparkles"></i>'; }
+    });
+  });
   document.getElementById('sa-inject-toggle')?.addEventListener('change',e=>{saveSetting('enabled',e.target.checked);e.target.nextElementSibling?.classList.toggle('sa-tog-on',e.target.checked);showToast(e.target.checked?'✓ Инъекция включена':'✓ Инъекция выключена');});
   document.getElementById('sa-btn-clear')?.addEventListener('click',()=>{if(!confirm('Удалить карту мира?'))return;delete getSettings().worlds[getChatId()];saveSettingsDebounced();showToast('✓ Карта удалена');refreshMain();});
 
@@ -767,6 +1214,9 @@ function bindMainEvents() {
   }
   document.getElementById('sa-key-eye')?.addEventListener('click',()=>{const inp=document.getElementById('sa-s-key');if(!inp)return;inp.type=inp.type==='password'?'text':'password';document.querySelector('#sa-key-eye i').className=inp.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});
   document.getElementById('sa-auto-wallpaper')?.addEventListener('change',e=>{saveSetting('autoWallpaper',e.target.checked);if(!e.target.checked)restoreWallpaper();else applyLocationWallpaper(getWorld());showToast(e.target.checked?'✓ Авто-обои включены':'✓ Авто-обои выключены');});
+  document.getElementById('sa-auto-track')?.addEventListener('change',e=>{saveSetting('autoTrackMovement',e.target.checked);showToast(e.target.checked?'✓ Трекинг движений включён':'✓ Трекинг выключен');});
+  document.getElementById('sa-inject-home')?.addEventListener('change',e=>{saveSetting('injectHome',e.target.checked);showToast(e.target.checked?'✓ Жилище в инжекте':'✓ Жилище убрано из инжекта');});
+  document.getElementById('sa-ctx-messages')?.addEventListener('change',e=>{saveSetting('contextMessages',Math.max(1,Math.min(50,Number(e.target.value)||15)));});
 
   const genMap={'sa-gen-sysprompt':'systemPrompt','sa-gen-loccount':'locationCount','sa-gen-npccount':'npcCount','sa-gen-wish':'userWish'};
   for (const [id,key] of Object.entries(genMap)) {
@@ -776,30 +1226,6 @@ function bindMainEvents() {
   const genChecks={'sa-gen-card':'includeCard','sa-gen-lorebook':'includeLorebook','sa-gen-user':'includeUser','sa-gen-npcs':'generateNpcs'};
   for (const [id,key] of Object.entries(genChecks)) { const el=document.getElementById(id);if(!el)continue;el.addEventListener('change',()=>saveGenSetting(key,el.checked)); }
   document.getElementById('sa-reset-sysprompt')?.addEventListener('click',()=>{saveGenSetting('systemPrompt',DEFAULT_SYSTEM_PROMPT);const ta=document.getElementById('sa-gen-sysprompt');if(ta)ta.value=DEFAULT_SYSTEM_PROMPT;showToast('✓ Промпт сброшен');});
-
-  // Обновление списка моделей
-  document.getElementById('sa-models-refresh')?.addEventListener('click', async () => {
-    const btn = document.getElementById('sa-models-refresh');
-    const sel = document.getElementById('sa-models-select');
-    if (!btn || !sel) return;
-    btn.classList.add('loading');
-    btn.disabled = true;
-    try {
-      const models = await fetchModels();
-      if (!models.length) { showToast('⚠ Моделей не найдено', true); return; }
-      sel.innerHTML = '<option value="">— выберите модель —</option>' + models.map(m => `<option value="${saEsc(m)}" ${getSettings().model===m?'selected':''}>${saEsc(m)}</option>`).join('');
-      sel.style.display = 'block';
-      sel.onchange = () => {
-        if (!sel.value) return;
-        saveSetting('model', sel.value);
-        const inp = document.getElementById('sa-s-model');
-        if (inp) inp.value = sel.value;
-        showToast(`✓ Модель: ${sel.value}`);
-      };
-      showToast(`✓ Найдено моделей: ${models.length}`);
-    } catch (e) { showToast(`✗ ${e.message}`, true); }
-    finally { btn.classList.remove('loading'); btn.disabled = false; }
-  });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -829,14 +1255,26 @@ let _init=false;
 function init() {
   if(_init)return; if(!document.getElementById('extensionsMenu'))return; _init=true;
   createUI(); $(document).on('click','#sa-menu-item',showMainPopup);
-  applyLocationWallpaper(getWorld());
+  const world = getWorld();
+  syncUserToCurrentLocation(world);
+  applyLocationWallpaper(world);
   console.log('[СораАтлас] initialized ✓');
 }
 
 jQuery(async()=>{
   getSettings();
-  eventSource.on(event_types.GENERATE_BEFORE_COMBINE_PROMPTS,onBeforeCombinePrompts);
-  eventSource.on(event_types.APP_READY,init);
-  setTimeout(init,300);
-  console.log('[СораАтлас] v1.4 loaded ✓');
+  eventSource.on(event_types.GENERATE_BEFORE_COMBINE_PROMPTS, onBeforeCombinePrompts);
+  // Хук на каждое новое сообщение AI — авто-трекинг движений
+  eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
+  // Хук на смену чата — обновляем обои + синхронизируем юзера
+  eventSource.on(event_types.CHAT_CHANGED, () => {
+    setTimeout(() => {
+      const world = getWorld();
+      syncUserToCurrentLocation(world);
+      applyLocationWallpaper(world);
+    }, 200);
+  });
+  eventSource.on(event_types.APP_READY, init);
+  setTimeout(init, 300);
+  console.log('[СораАтлас] v1.5 loaded ✓');
 });
