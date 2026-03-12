@@ -1,0 +1,9 @@
+{
+  "display_name": "СораАтлас",
+  "version": "1.0.0",
+  "js": "index.js",
+  "css": "style.css",
+  "author": "kiskaSora",
+  "homePage": "https://github.com/KiskaSora",
+  "description": "🗺️ Карта мира и локации — генерирует места по карточке персонажа и лорбуку, инжектирует текущую локацию в контекст"
+}
