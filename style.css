@@ -7,7 +7,6 @@
   border: none !important;
   box-shadow: none !important;
   border-radius: 0 !important;
-  overflow: visible !important;
 }
 /* скрываем стандартную кнопку OK у нашего попапа */
 *:has(> #sa-modal) ~ *,
@@ -1216,47 +1215,47 @@
   align-items: center !important;
   justify-content: space-between !important;
   padding: 8px 0 10px !important;
-  border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-  margin-bottom: 2px !important;
+  border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+  margin-bottom: 4px !important;
   flex-shrink: 0 !important;
   position: sticky !important;
   top: 0 !important;
-  background: #0e0e1c !important;
+  background: #131322 !important;
   z-index: 5 !important;
 }
 .sa-editor-inner[data-theme="light"] .sa-editor-topbar {
-  border-bottom-color: rgba(61,31,24,0.1) !important;
+  border-bottom-color: rgba(61,31,24,0.12) !important;
   background: #faf6f0 !important;
 }
 
 .sa-editor-topbar-title {
   font-family: 'Cormorant Garamond', Georgia, serif !important;
-  font-size: 0.72rem !important;
-  letter-spacing: 0.18em !important;
-  color: rgba(255,255,255,0.22) !important;
+  font-size: 0.8rem !important;
+  letter-spacing: 0.14em !important;
+  color: rgba(255,255,255,0.45) !important;
   font-style: italic !important;
-  font-weight: 300 !important;
+  font-weight: 400 !important;
   text-transform: uppercase !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
 }
 .sa-editor-inner[data-theme="light"] .sa-editor-topbar-title {
-  color: rgba(61,31,24,0.3) !important;
+  color: rgba(61,31,24,0.5) !important;
 }
 
 .sa-editor-close {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  width: 22px !important;
-  height: 22px !important;
-  border-radius: 4px !important;
-  background: transparent !important;
-  border: 1px solid rgba(255,255,255,0.1) !important;
-  color: rgba(255,255,255,0.28) !important;
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 5px !important;
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+  color: rgba(255,255,255,0.55) !important;
   cursor: pointer !important;
-  font-size: 0.72rem !important;
+  font-size: 0.75rem !important;
   line-height: 1 !important;
   padding: 0 !important;
   flex-shrink: 0 !important;
@@ -1264,17 +1263,18 @@
   font-family: system-ui !important;
 }
 .sa-editor-close:hover {
-  background: rgba(248,113,113,0.14) !important;
-  border-color: rgba(248,113,113,0.4) !important;
+  background: rgba(248,113,113,0.18) !important;
+  border-color: rgba(248,113,113,0.5) !important;
   color: #f87171 !important;
 }
 .sa-editor-inner[data-theme="light"] .sa-editor-close {
-  border-color: rgba(61,31,24,0.14) !important;
-  color: rgba(61,31,24,0.28) !important;
+  background: rgba(0,0,0,0.04) !important;
+  border-color: rgba(61,31,24,0.22) !important;
+  color: rgba(61,31,24,0.55) !important;
 }
 .sa-editor-inner[data-theme="light"] .sa-editor-close:hover {
   background: rgba(184,64,48,0.09) !important;
-  border-color: rgba(184,64,48,0.35) !important;
+  border-color: rgba(184,64,48,0.45) !important;
   color: #b84030 !important;
 }
 
@@ -1324,7 +1324,7 @@
   --sa-btn-sm-clr: #ccc;
   --sa-select-bg: #111;
 
-  background: #0e0e1c !important;
+  background: #131322 !important;
   color: #d8cfd8 !important;
   font-family: 'Jost', system-ui, sans-serif !important;
   display: flex;
@@ -1336,56 +1336,70 @@
   overscroll-behavior: contain;
 }
 .sa-editor-inner label {
-  font-size: 0.59rem !important;
+  font-size: 0.62rem !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.08em !important;
-  color: rgba(255,255,255,0.35) !important;
-  margin-top: 6px !important;
-  font-weight: 300 !important;
+  letter-spacing: 0.09em !important;
+  color: rgba(255,255,255,0.52) !important;
+  margin-top: 8px !important;
+  font-weight: 400 !important;
   font-family: 'Jost', system-ui, sans-serif !important;
 }
 .sa-editor-inner[data-theme="light"] label {
-  color: rgba(61,31,24,0.45) !important;
+  color: rgba(61,31,24,0.6) !important;
 }
 .sa-editor-inner input[type="text"],
 .sa-editor-inner input[type="password"],
 .sa-editor-inner input[type="number"],
 .sa-editor-inner textarea,
 .sa-editor-inner select {
-  background: rgba(255,255,255,0.07) !important;
-  border: 1px solid rgba(255,255,255,0.13) !important;
-  border-radius: 5px !important;
-  color: #e0d8e0 !important;
-  padding: 7px 10px !important;
+  background: #1e1e32 !important;
+  border: 1.5px solid rgba(255,255,255,0.18) !important;
+  border-radius: 6px !important;
+  color: #f0ece8 !important;
+  padding: 9px 12px !important;
   font-family: 'Jost', system-ui, sans-serif !important;
-  font-size: 0.82rem !important;
+  font-size: 0.88rem !important;
   outline: none !important;
   transition: border-color 0.18s, background 0.18s !important;
   width: 100% !important;
   box-sizing: border-box !important;
   resize: vertical !important;
-  line-height: 1.5 !important;
+  line-height: 1.55 !important;
   caret-color: #f0a8bc !important;
+  min-height: 38px !important;
+}
+.sa-editor-inner textarea {
+  min-height: 72px !important;
+}
+.sa-editor-inner input::placeholder,
+.sa-editor-inner textarea::placeholder {
+  color: rgba(255,255,255,0.28) !important;
 }
 .sa-editor-inner input:focus,
 .sa-editor-inner textarea:focus,
 .sa-editor-inner select:focus {
-  border-color: rgba(240,168,188,0.5) !important;
-  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(240,168,188,0.6) !important;
+  background: #22203a !important;
+  box-shadow: 0 0 0 2px rgba(240,168,188,0.1) !important;
 }
 .sa-editor-inner[data-theme="light"] input[type="text"],
 .sa-editor-inner[data-theme="light"] input[type="password"],
 .sa-editor-inner[data-theme="light"] input[type="number"],
 .sa-editor-inner[data-theme="light"] textarea,
 .sa-editor-inner[data-theme="light"] select {
-  background: rgba(255,255,255,0.85) !important;
-  border-color: rgba(61,31,24,0.18) !important;
-  color: #3d1f18 !important;
+  background: #ffffff !important;
+  border-color: rgba(61,31,24,0.22) !important;
+  color: #2a1a14 !important;
   caret-color: #b84030 !important;
+}
+.sa-editor-inner[data-theme="light"] input::placeholder,
+.sa-editor-inner[data-theme="light"] textarea::placeholder {
+  color: rgba(61,31,24,0.35) !important;
 }
 .sa-editor-inner[data-theme="light"] input:focus,
 .sa-editor-inner[data-theme="light"] textarea:focus {
-  border-color: rgba(184,64,48,0.45) !important;
+  border-color: rgba(184,64,48,0.5) !important;
+  box-shadow: 0 0 0 2px rgba(184,64,48,0.08) !important;
 }
 
 .sa-editor-title {
@@ -2044,3 +2058,62 @@
   border-color: var(--sa-baccent) !important;
   color: var(--sa-accent) !important;
 }
+
+/* ══════════════════════════════════════════════════════════
+   МОДЕЛИ — строка выбора
+   ══════════════════════════════════════════════════════════ */
+
+.sa-model-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.sa-model-row .sa-sinput {
+  flex: 1;
+  min-width: 0;
+}
+
+.sa-btn-fetch-models {
+  flex-shrink: 0;
+  padding: 6px 9px !important;
+  color: var(--sa-violet) !important;
+  border-color: rgba(196,168,232,0.25) !important;
+  background: rgba(196,168,232,0.06) !important;
+  font-size: 0.7rem !important;
+}
+.sa-btn-fetch-models:hover:not(:disabled) {
+  background: rgba(196,168,232,0.14) !important;
+  border-color: rgba(196,168,232,0.4) !important;
+}
+.sa-btn-fetch-models:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.sa-models-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--sa-bg3);
+  border: 1px solid var(--sa-border);
+  border-radius: 5px;
+}
+.sa-models-list::-webkit-scrollbar { width: 3px; }
+.sa-models-list::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
+
+.sa-model-chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--sa-border);
+  background: var(--sa-bg3);
+  color: var(--sa-mid);
+  font-size: 0.64rem;
+  cursor: pointer;
+  font-family: var(--sa-sans);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.sa-model-chip:hover { border-color: var(--sa-baccent); color: var(--sa-accent); background: var(--sa-mist0); }
+.sa-model-chip-on { border-color: var(--sa-baccent) !important; color: var(--sa-accent) !important; background: var(--sa-mist) !important; }
+

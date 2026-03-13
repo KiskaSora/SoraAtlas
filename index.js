@@ -790,7 +790,8 @@ function buildMapTab(world,has) {
 
 function renderTile(loc,world) {
   const active=loc.id===world.currentLocationId;
-  const charsHere=(world.characters||[]).filter(c=>c.locationId===loc.id);
+  // Characters visibly at this location — exclude those who are "at home" (away from scene)
+  const charsHere=(world.characters||[]).filter(c=>c.locationId===loc.id && !c.isAtHome);
   return `<div class="sa-tile${active?' sa-tile-active':''}" data-locid="${saEsc(loc.id)}">
     <button class="sa-tile-edit-btn" data-editid="${saEsc(loc.id)}"><i class="fa-solid fa-pen"></i></button>
     ${loc.image?`<div class="sa-tile-cover" style="background-image:url(${loc.image})"></div>`:`<div class="sa-tile-icon">${loc.icon||'📍'}</div>`}
@@ -913,7 +914,14 @@ function buildSettingsTab() {
       <div class="sa-key-status">${s.api_key?'<span class="sa-key-ok">✓ ключ задан</span>':'<span class="sa-key-empty">ключ не задан</span>'}</div>
     </div>
     <div class="sa-row-2">
-      <div class="sa-sfield"><label>Модель</label><input id="sa-s-model" type="text" class="sa-sinput" placeholder="gpt-4o-mini" value="${saEsc(s.model||'')}"></div>
+      <div class="sa-sfield">
+        <label>Модель</label>
+        <div class="sa-model-row">
+          <input id="sa-s-model" type="text" class="sa-sinput" placeholder="gpt-4o-mini" value="${saEsc(s.model||'')}">
+          <button class="sa-small-btn sa-btn-fetch-models" id="sa-btn-fetch-models" title="Загрузить список моделей" ${!s.api_key?'disabled':''}><i class="fa-solid fa-rotate"></i></button>
+        </div>
+        <div id="sa-models-list" class="sa-models-list" style="display:none"></div>
+      </div>
       <div class="sa-sfield"><label>Язык</label><select id="sa-s-lang" class="sa-sinput"><option value="ru" ${s.lang==='ru'?'selected':''}>Русский</option><option value="en" ${s.lang==='en'?'selected':''}>English</option></select></div>
     </div>
   </div>
@@ -955,13 +963,13 @@ function buildSettingsTab() {
       <div class="sa-sfield"><label>НПС доп.</label><input id="sa-gen-npccount" type="number" class="sa-sinput" min="0" max="10" value="${gen.npcCount||3}"></div>
     </div>
     <div class="sa-checkboxes">
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-card" ${gen.includeCard?'checked':''}}> Карточка</label>
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-lorebook" ${gen.includeLorebook?'checked':''}}> Лорбук</label>
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-user" ${gen.includeUser?'checked':''}}> {{user}}</label>
-      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-npcs" ${gen.generateNpcs?'checked':''}}> Доп. НПС</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-card" ${gen.includeCard?'checked':''}> Карточка</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-lorebook" ${gen.includeLorebook?'checked':''}> Лорбук</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-user" ${gen.includeUser?'checked':''}> {{user}}</label>
+      <label class="sa-chk-label"><input type="checkbox" id="sa-gen-npcs" ${gen.generateNpcs?'checked':''}> Доп. НПС</label>
     </div>
     <div class="sa-sfield" style="margin-top:8px"><label>Пожелания <span class="sa-hint">добавляются к запросу</span></label>
-      <textarea id="sa-gen-wish" class="sa-sinput" rows="2" placeholder="тёмное фэнтези, маленький городок...">${saEsc(gen.userWish||'')}}</textarea>
+      <textarea id="sa-gen-wish" class="sa-sinput" rows="2" placeholder="тёмное фэнтези, маленький городок...">${saEsc(gen.userWish||'')}</textarea>
     </div>
   </div>
 </div>`;
@@ -1111,20 +1119,22 @@ function buildRoomEditorHTML(charId, roomId) {
 function patchSTPopup(rootSelector) {
   const root = document.querySelector(rootSelector);
   if (!root) return;
-  // Прячем кнопку ОК у корневого контейнера (у CONFIRM-попапов кнопки оставляем)
-  // Снимаем стили со всех родителей
+  // Only strip styles on the immediate ST popup wrapper elements, NOT beyond
+  // Stop at known ST popup container boundaries to avoid resizing the whole UI
+  const ST_STOP_CLASSES = ['dialogue_popup', 'popup', 'shadow_popup', 'draggable', 'popup_content'];
   let el = root.parentElement;
-  for (let i = 0; i < 8 && el; i++) {
-    if (el.id === 'sa-modal') break;
-    el.style.setProperty('background',  'transparent', 'important');
-    el.style.setProperty('border',      'none',        'important');
-    el.style.setProperty('box-shadow',  'none',        'important');
-    el.style.setProperty('padding',     '0',           'important');
-    el.style.setProperty('border-radius','0',          'important');
-    el.style.setProperty('overflow',    'visible',     'important');
+  for (let i = 0; i < 5 && el; i++) {
+    // Stop if we've hit an ST structural container
+    if (ST_STOP_CLASSES.some(cls => el.classList?.contains(cls))) break;
+    if (el.id === 'sa-modal' || el.id === 'sa-loc-popup') break;
+    el.style.setProperty('background',   'transparent', 'important');
+    el.style.setProperty('border',       'none',        'important');
+    el.style.setProperty('box-shadow',   'none',        'important');
+    el.style.setProperty('padding',      '0',           'important');
+    el.style.setProperty('border-radius','0',           'important');
+    // Do NOT set overflow:visible — this can resize the ST window
     el = el.parentElement;
   }
-  // Применяем тему на корень
   const theme = getSettings().theme || 'dark';
   root.dataset.theme = theme;
 }
@@ -1140,7 +1150,7 @@ async function openLocationEditorPopup(locId) {
 
   requestAnimationFrame(()=>{
     patchSTPopup('.sa-editor-inner');
-    document.querySelector('.sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
+    document.querySelector('.sa-editor-inner .sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
     wireIcons('.sa-icon-opt',v=>{fs.icon=v;});
     wireInput('sa-ed-name','name',fs); wireInput('sa-ed-desc','desc',fs); wireInput('sa-ed-atm','atm',fs); wireInput('sa-ed-items','items',fs); wireInput('sa-ed-npcs','npcs',fs);
     document.querySelectorAll('.sa-conn-check').forEach(cb=>cb.addEventListener('change',()=>{fs.conns=Array.from(document.querySelectorAll('.sa-conn-check:checked')).map(e=>e.value);}));
@@ -1192,7 +1202,7 @@ async function openCharEditorPopup(charId) {
 
   requestAnimationFrame(()=>{
     patchSTPopup('.sa-editor-inner');
-    document.querySelector('.sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
+    document.querySelector('.sa-editor-inner .sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
     wireIcons('.sa-icon-opt',v=>{fs.icon=v;});
     wireColors('.sa-color-opt',v=>{fs.color=v;});
     wireInput('sa-ch-name','name',fs); wireSelect('sa-ch-type','type',fs); wireSelect('sa-ch-loc','locId',fs);
@@ -1237,7 +1247,7 @@ async function openHomeEditorPopup(charId) {
   const world=getWorld(), char=world.characters.find(c=>c.id===charId); if (!char) return;
   const fs={icon:char?.home?.icon||'🏠',name:char?.home?.name||'',desc:char?.home?.description||''};
   const popup=new Popup(buildHomeEditorHTML(charId),POPUP_TYPE.CONFIRM,'',{okButton:'💾 Сохранить',cancelButton:'Отмена'});
-  requestAnimationFrame(()=>{patchSTPopup('.sa-editor-inner'); document.querySelector('.sa-editor-close-btn')?.addEventListener('click',()=>popup.complete(false)); wireIcons('.sa-icon-opt',v=>{fs.icon=v;}); wireInput('sa-hm-name','name',fs); wireInput('sa-hm-desc','desc',fs);});
+  requestAnimationFrame(()=>{patchSTPopup('.sa-editor-inner'); document.querySelector('.sa-editor-inner .sa-editor-close-btn')?.addEventListener('click',()=>popup.complete(false)); wireIcons('.sa-icon-opt',v=>{fs.icon=v;}); wireInput('sa-hm-name','name',fs); wireInput('sa-hm-desc','desc',fs);});
   const result=await popup.show(); if (!result) return;
   if (!char.home) char.home={rooms:[]};
   char.home.icon=fs.icon; char.home.name=fs.name.trim(); char.home.description=fs.desc.trim();
@@ -1252,7 +1262,7 @@ async function openRoomEditorPopup(charId, roomId) {
   const popup=new Popup(buildRoomEditorHTML(charId,roomId),POPUP_TYPE.CONFIRM,'',{okButton:roomId?'💾 Сохранить':'➕ Добавить',cancelButton:'Отмена'});
   requestAnimationFrame(()=>{
     patchSTPopup('.sa-editor-inner');
-    document.querySelector('.sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
+    document.querySelector('.sa-editor-inner .sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
     wireIcons('.sa-icon-opt',v=>{fs.icon=v;}); wireInput('sa-rm-name','name',fs); wireInput('sa-rm-desc','desc',fs); wireInput('sa-rm-items','items',fs);
     document.getElementById('sa-rm-delete')?.addEventListener('click',()=>{popup.complete(null);if(!confirm('Удалить?'))return;char.home.rooms=(char.home.rooms||[]).filter(r=>r.id!==roomId);saveWorld(world);showToast('✓ Удалена');refreshMain();});
   });
@@ -1269,12 +1279,13 @@ async function openLocationPopup(locId) {
   const s=getSettings();
   const popup=new Popup(buildLocationHTML(locId),POPUP_TYPE.TEXT,'',{wide:false,allowVerticalScrolling:true});
   requestAnimationFrame(()=>{
-    // Применяем тему и убираем стили ST
     const locPopup=document.querySelector('.sa-loc-popup');
     if(locPopup){
       locPopup.dataset.theme=s.theme||'dark';
+      const ST_STOP=['dialogue_popup','popup','shadow_popup','draggable','popup_content'];
       let el=locPopup.parentElement;
-      for(let i=0;i<6&&el;i++){
+      for(let i=0;i<4&&el&&el.tagName!=='BODY';i++){
+        if(ST_STOP.some(cls=>el.classList?.contains(cls)))break;
         el.style.cssText='background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;border-radius:0!important;';
         el=el.parentElement;
       }
@@ -1303,21 +1314,19 @@ async function showMainPopup() {
   currentMainPopup=new Popup(buildMainHTML(),POPUP_TYPE.TEXT,'',{wide:true,allowVerticalScrolling:true});
   requestAnimationFrame(()=>{
     bindMainEvents();
-    // Убираем родной стиль обёртки ST и кнопку OK
     const modal = document.getElementById('sa-modal');
     if (modal) {
-      // Подниматься по DOM пока не найдём контейнер попапа
+      const ST_STOP = ['dialogue_popup', 'popup', 'shadow_popup', 'draggable', 'popup_content'];
       let el = modal.parentElement;
-      for (let i = 0; i < 6 && el; i++) {
-        const s = el.style;
-        s.background = 'transparent';
-        s.border = 'none';
-        s.boxShadow = 'none';
-        s.padding = '0';
-        s.borderRadius = '0';
+      for (let i = 0; i < 3 && el && el.tagName !== 'BODY'; i++) {
+        if (ST_STOP.some(cls => el.classList?.contains(cls))) break;
+        el.style.background = 'transparent';
+        el.style.border = 'none';
+        el.style.boxShadow = 'none';
+        el.style.padding = '0';
+        el.style.borderRadius = '0';
         el = el.parentElement;
       }
-      // Прячем кнопку OK
       document.querySelectorAll('.menu_button, .popup_ok_button, [class*="ok_button"]').forEach(btn => {
         if (!btn.closest('#sa-modal')) btn.style.display = 'none';
       });
@@ -1487,8 +1496,42 @@ function bindMainEvents() {
   const apiMap={'sa-s-url':'api_url','sa-s-key':'api_key','sa-s-model':'model','sa-s-lang':'lang'};
   for (const [id,key] of Object.entries(apiMap)) {
     const el=document.getElementById(id);if(!el)continue;
-    el.addEventListener(el.tagName==='SELECT'?'change':'input',()=>{saveSetting(key,el.value);if(key==='api_key'){const st=document.getElementById('sa-key-status');if(st)st.innerHTML=el.value.trim()?'<span class="sa-key-ok">✓ ключ задан</span>':'<span class="sa-key-empty">ключ не задан</span>';}});
+    el.addEventListener(el.tagName==='SELECT'?'change':'input',()=>{saveSetting(key,el.value);if(key==='api_key'){const st=document.getElementById('sa-key-status');if(st)st.innerHTML=el.value.trim()?'<span class="sa-key-ok">✓ ключ задан</span>':'<span class="sa-key-empty">ключ не задан</span>';const fb=document.getElementById('sa-btn-fetch-models');if(fb)fb.disabled=!el.value.trim();}});
   }
+
+  // Загрузка списка моделей
+  document.getElementById('sa-btn-fetch-models')?.addEventListener('click', async () => {
+    const btn = document.getElementById('sa-btn-fetch-models');
+    const list = document.getElementById('sa-models-list');
+    const s = getSettings();
+    if (!s.api_key || !s.api_url) { showToast('✗ Укажите URL и ключ', true); return; }
+    btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    try {
+      const resp = await fetch(`${s.api_url.replace(/\/+$/,'')}/models`, {
+        headers: { 'Authorization': `Bearer ${s.api_key}` }
+      });
+      if (!resp.ok) throw new Error(`${resp.status}`);
+      const data = await resp.json();
+      const models = (data.data || data.models || [])
+        .map(m => typeof m === 'string' ? m : m.id)
+        .filter(Boolean)
+        .sort();
+      if (!models.length) { showToast('✗ Модели не найдены', true); return; }
+      list.style.display = 'flex';
+      list.innerHTML = models.map(m => `<button class="sa-model-chip${s.model===m?' sa-model-chip-on':''}" data-model="${saEsc(m)}">${saEsc(m)}</button>`).join('');
+      list.querySelectorAll('.sa-model-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          saveSetting('model', chip.dataset.model);
+          const inp = document.getElementById('sa-s-model'); if (inp) inp.value = chip.dataset.model;
+          list.querySelectorAll('.sa-model-chip').forEach(c => c.classList.remove('sa-model-chip-on'));
+          chip.classList.add('sa-model-chip-on');
+          showToast(`✓ Модель: ${chip.dataset.model}`);
+        });
+      });
+      showToast(`✓ Загружено ${models.length} моделей`);
+    } catch(e) { showToast(`✗ ${e.message}`, true); }
+    finally { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-rotate"></i>'; }
+  });
   document.getElementById('sa-key-eye')?.addEventListener('click',()=>{const inp=document.getElementById('sa-s-key');if(!inp)return;inp.type=inp.type==='password'?'text':'password';document.querySelector('#sa-key-eye i').className=inp.type==='password'?'fa-solid fa-eye':'fa-solid fa-eye-slash';});
   document.getElementById('sa-auto-wallpaper')?.addEventListener('change',e=>{saveSetting('autoWallpaper',e.target.checked);if(!e.target.checked)restoreWallpaper();else applyLocationWallpaper(getWorld());showToast(e.target.checked?'✓ Авто-обои включены':'✓ Авто-обои выключены');});
   document.getElementById('sa-auto-track')?.addEventListener('change',e=>{saveSetting('autoTrackMovement',e.target.checked);showToast(e.target.checked?'✓ Трекинг движений включён':'✓ Трекинг выключен');});
