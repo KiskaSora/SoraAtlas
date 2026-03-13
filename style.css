@@ -1,6 +1,6 @@
 /* СораАтлас v2.0 — переопределяем обёртку ST */
 
-/* ── Убираем родной контур ST-попапа ──────────────────────── */
+/* ── Убираем родной контур ST-попапа для ГЛАВНОГО модала ── */
 *:has(> #sa-modal) {
   padding: 0 !important;
   background: transparent !important;
@@ -8,15 +8,7 @@
   box-shadow: none !important;
   border-radius: 0 !important;
 }
-/* скрываем стандартную кнопку OK у нашего попапа */
-*:has(> #sa-modal) ~ *,
-*:has(> #sa-modal) + * {
-  display: none !important;
-}
-/* на всякий случай — широкий охват кнопки OK */
-.popup_button_panel:has(+ * #sa-modal),
-*:has(#sa-modal) .popup_button_panel,
-*:has(#sa-modal) .menu_button { display: none !important; }
+/* Скрываем кнопку OK только для прямого родителя #sa-modal — через JS */
 
 /* СораАтлас v2.0 — Новый облик */
 
@@ -28,22 +20,14 @@
    ══════════════════════════════════════════════════════════ */
 
 #sa-modal {
-  border: 1px solid rgba(240,168,188,0.15);
+  border: none;
   border-radius: 6px;
   overflow: hidden;
-  box-shadow:
-    0 0 0 1px rgba(0,0,0,0.6),
-    0 0 40px rgba(240,168,188,0.04),
-    0 24px 64px rgba(0,0,0,0.65);
+  box-shadow: none;
 }
 
 #sa-modal[data-theme="light"] {
-  border: 1px solid rgba(184,64,48,0.18);
-  box-shadow:
-    inset 0 0 0 3px rgba(255,255,255,0.55),
-    inset 0 0 0 4px rgba(184,64,48,0.06),
-    0 2px 4px rgba(61,31,24,0.06),
-    0 16px 48px rgba(61,31,24,0.12);
+  box-shadow: none;
 }
 
 /* Угловые орнаменты */
@@ -72,19 +56,7 @@
 #sa-modal[data-theme="light"] .sa-frame-bar + .sa-content::before,
 #sa-modal[data-theme="light"] .sa-frame-bar + .sa-content::after { border-color: rgba(184,64,48,0.3); }
 
-/* Угловые орнаменты на #sa-modal */
-#sa-modal::before, #sa-modal::after {
-  content: '';
-  position: absolute;
-  width: 12px; height: 12px;
-  border-color: rgba(240,168,188,0.4);
-  border-style: solid;
-  z-index: 10; pointer-events: none;
-}
-#sa-modal::before { top: 0; left: 0; border-width: 1.5px 0 0 1.5px; border-radius: 2px 0 0 0; }
-#sa-modal::after  { top: 0; right: 0; border-width: 1.5px 1.5px 0 0; border-radius: 0 2px 0 0; }
-#sa-modal[data-theme="light"]::before,
-#sa-modal[data-theme="light"]::after { border-color: rgba(184,64,48,0.3); }
+/* Угловые орнаменты только внутри контента — не на #sa-modal где они убегают */
 
 .sa-frame-bar {
   display: flex;

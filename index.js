@@ -115,9 +115,13 @@ function restoreWallpaper() {
 }
 
 function applyLocationWallpaper(world) {
-  if (!getSettings().autoWallpaper) return;
   const loc = world?.locations?.find(l => l.id === world.currentLocationId);
-  if (loc?.image) applyWallpaper(loc.image);
+  if (loc?.image) {
+    applyWallpaper(loc.image);
+  } else if (getSettings().autoWallpaper) {
+    // No image but autoWallpaper on — restore
+    restoreWallpaper();
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -803,12 +807,13 @@ function renderTile(loc,world) {
 
 function buildCharsTab(world) {
   const chars=world.characters||[];
+  const typeLabel={user:'🧑 юзер',main:'⭐ главный',npc:'👤 нпс'};
   return `<div class="sa-chars-wrap">
-  <div class="sa-chars-header"><span class="sa-section-lbl">Персонажи (${chars.length})</span><button class="sa-small-btn" id="sa-add-char"><i class="fa-solid fa-plus"></i> Добавить</button></div>
+  <div class="sa-chars-header"><span class="sa-section-lbl">👥 Персонажи (${chars.length})</span><button class="sa-small-btn" id="sa-add-char">✨ Добавить</button></div>
   <div class="sa-chars-list">${chars.map(c=>{
     const locName=world.locations.find(l=>l.id===c.locationId)?.name||'—';
     const dispName=c.name==='{{user}}'?`{{user}} (${getUserName()})`:c.name;
-    const tl={user:'юзер',main:'главный',npc:'нпс'}[c.type]||c.type;
+    const tl=typeLabel[c.type]||c.type;
     return `<div class="sa-char-row">
       <div class="sa-char-avatar-wrap" data-charavatarid="${saEsc(c.id)}" title="Нажать — сменить фото">
         ${renderCharAvatar(c,38)}
@@ -816,11 +821,11 @@ function buildCharsTab(world) {
       </div>
       <div class="sa-char-row-info">
         <div class="sa-char-row-name">${saEsc(dispName)}</div>
-        <div class="sa-char-row-meta"><span class="sa-type-badge sa-type-${c.type}">${tl}</span> · 📍 ${saEsc(locName)}</div>
+        <div class="sa-char-row-meta"><span class="sa-type-badge sa-type-${c.type}">${tl}</span> · 📍 ${saEsc(locName)}${c.home?` · 🏠 ${saEsc(c.home.name||'жилище')}`:''}</div>
       </div>
       <div class="sa-char-row-actions">
-        <button class="sa-char-edit-btn" data-charid="${saEsc(c.id)}"><i class="fa-solid fa-pen"></i></button>
-        ${c.id!=='u_user'?`<button class="sa-char-del-btn" data-charid="${saEsc(c.id)}"><i class="fa-solid fa-trash"></i></button>`:''}
+        <button class="sa-char-edit-btn" data-charid="${saEsc(c.id)}" title="✏️ Редактировать"><i class="fa-solid fa-pen"></i></button>
+        ${c.id!=='u_user'?`<button class="sa-char-del-btn" data-charid="${saEsc(c.id)}" title="🗑 Удалить"><i class="fa-solid fa-trash"></i></button>`:''}
       </div>
     </div>`;
   }).join('')}</div></div>`;
@@ -1186,9 +1191,13 @@ async function openLocationEditorPopup(locId) {
   const result=await popup.show(); if (!result) return;
   if (!fs.name.trim()) { showToast('✗ Введите название',true); return; }
   const data={name:fs.name.trim(),icon:fs.icon,description:fs.desc.trim(),atmosphere:fs.atm.trim(),items:fs.items.split('\n').map(s=>s.trim()).filter(Boolean),visitableNpcs:fs.npcs.split('\n').map(s=>s.trim()).filter(Boolean),connections:fs.conns,image:fs.image};
+  let savedLocId = locId;
   if (locId) { const loc=world.locations.find(l=>l.id===locId); if (loc) Object.assign(loc,data); }
-  else { const id=`loc_${Date.now()}`; world.locations.push({id,...data}); if (!world.currentLocationId) world.currentLocationId=id; }
-  saveWorld(world); showToast('✓ Сохранено'); refreshMain();
+  else { savedLocId=`loc_${Date.now()}`; world.locations.push({id:savedLocId,...data}); if (!world.currentLocationId) world.currentLocationId=savedLocId; }
+  saveWorld(world);
+  showToast('✓ Сохранено');
+  if (data.image && savedLocId === world.currentLocationId) applyWallpaper(data.image);
+  refreshMain();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1327,9 +1336,19 @@ async function showMainPopup() {
         el.style.borderRadius = '0';
         el = el.parentElement;
       }
-      document.querySelectorAll('.menu_button, .popup_ok_button, [class*="ok_button"]').forEach(btn => {
-        if (!btn.closest('#sa-modal')) btn.style.display = 'none';
-      });
+      // Hide OK button only in THIS specific popup, not globally
+      // Walk up to find the popup container, then find its button panel
+      let container = modal.parentElement;
+      for (let i = 0; i < 5 && container && container.tagName !== 'BODY'; i++) {
+        const panel = container.querySelector('.popup_button_panel, .menu_button_panel');
+        if (panel) { panel.style.display = 'none'; break; }
+        // Also try sibling
+        const sib = container.nextElementSibling;
+        if (sib?.classList?.contains('popup_button_panel') || sib?.querySelector('.menu_button')) {
+          sib.style.display = 'none'; break;
+        }
+        container = container.parentElement;
+      }
     }
   });
   await currentMainPopup.show();
