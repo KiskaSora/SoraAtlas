@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════════════════════
-//  СораАтлас v1.5
+//  СораАтлас v2.0
+//  + Интерактивный план жилища (floor plan с hover-тултипами)
+//  + Интерактивная карта мира с инфо-тайлами
+//  + AI генерирует highlight/owner/span для комнат
 //  + Умный компактный инжект (локация + жилище + инструкция)
 //  + Авто-трекинг движения персонажей из текста AI
-//  + Поиск персонажей в карточке при генерации
-//  + Хуки на события чата
 // ═══════════════════════════════════════════════════════════
 
 import { extension_settings } from '../../../extensions.js';
@@ -512,6 +513,7 @@ Rules:
 - Characters found in the card description should be type "main" or "npc" based on importance
 - Each character should start at a logical location based on their role
 - visitableNpcs on locations = background characters who might be encountered there
+- SPATIAL MAP: assign mapCol (1-4) and mapRow (1-4) to each location so they form a logical spatial map. Adjacent/connected locations should be near each other. Use different cells — no two locations share the same (mapCol, mapRow).
 
 Respond in ${lang}. Return ONLY valid JSON:
 {
@@ -526,6 +528,8 @@ Respond in ${lang}. Return ONLY valid JSON:
       "items": ["item", "item", "item"],
       "connections": ["loc_2"],
       "visitableNpcs": ["background NPC name"],
+      "mapCol": 2,
+      "mapRow": 1,
       "isDefault": true
     }
   ],
@@ -599,6 +603,16 @@ ${wishBlock}${typeBlock}
 
 These characters share ONE home together. Create a single shared residence that fits all of them.
 It should have 4-6 rooms reflecting all residents' personalities.
+
+SPATIAL FLOOR PLAN RULES (critical):
+- Assign gridCols (3-5) and gridRows (2-4) to define the home's layout grid
+- Each room gets: col (1-based), row (1-based), colSpan (1-2), rowSpan (1-2)
+- Rooms must NOT overlap. Together they should fill most of the grid
+- Use colSpan:2 for large rooms like living room, kitchen
+- "owner": which resident this room belongs to (or null for shared)
+- "highlight": true for the most story-important room (only 1-2 per home)
+- "wallType": "solid" (default), "glass" (transparent partition), "open" (no wall, open plan)
+
 Respond in ${lang}. Return ONLY valid JSON:
 {
   "homes": [
@@ -609,12 +623,18 @@ Respond in ${lang}. Return ONLY valid JSON:
         "icon": "🏠",
         "name": "Shared home name",
         "description": "2 sentences about the shared home",
+        "gridCols": 3,
+        "gridRows": 3,
         "rooms": [
           {
             "icon": "🛋️",
             "name": "Room name",
             "description": "Brief sensory description",
-            "items": ["item1", "item2", "item3"]
+            "items": ["item1", "item2", "item3"],
+            "owner": null,
+            "highlight": false,
+            "wallType": "solid",
+            "col": 1, "row": 1, "colSpan": 2, "rowSpan": 1
           }
         ]
       }
@@ -632,6 +652,16 @@ ${wishBlock}${typeBlock}
 
 For each character, create a personal home/residence that fits their personality and role in the story.
 Each home should have 3-5 rooms with evocative names and items.
+
+SPATIAL FLOOR PLAN RULES (critical):
+- Assign gridCols (3-4) and gridRows (2-3) to the home
+- Each room gets: col (1-based), row (1-based), colSpan (1-2), rowSpan (1-2)
+- Rooms MUST NOT overlap. Place them like a real apartment blueprint
+- Use colSpan:2 for large rooms (living room, main bedroom)
+- "owner": character name if it's their personal room, null for shared spaces
+- "highlight": true for the most important room in the story (max 1 per home)
+- "wallType": "solid" (default), "glass", or "open"
+
 Respond in ${lang}. Return ONLY valid JSON:
 {
   "homes": [
@@ -641,12 +671,18 @@ Respond in ${lang}. Return ONLY valid JSON:
         "icon": "🏠",
         "name": "Apartment name",
         "description": "2 sentences about the home",
+        "gridCols": 3,
+        "gridRows": 2,
         "rooms": [
           {
             "icon": "🛋️",
             "name": "Room name",
             "description": "Brief sensory description",
-            "items": ["item1", "item2", "item3"]
+            "items": ["item1", "item2", "item3"],
+            "owner": "Character name or null",
+            "highlight": false,
+            "wallType": "solid",
+            "col": 1, "row": 1, "colSpan": 2, "rowSpan": 1
           }
         ]
       }
@@ -786,7 +822,7 @@ function buildMapTab(world,has) {
 
   return `${world.worldDescription?`<div id="sa-world-desc">${saEsc(world.worldDescription)}</div>`:''}
   ${homePanel}
-  <div id="sa-map-grid">${world.locations.map(loc=>renderTile(loc,world)).join('')}</div>
+  ${renderSpatialMap(world)}
   <button class="sa-map-add-btn" id="sa-btn-add-loc"><i class="fa-solid fa-plus"></i> Добавить локацию</button>
   <div id="sa-foot"><div id="sa-foot-label">${sp4(9,'var(--sa-faint)')} текущая:</div>
   <div id="sa-inject-preview">${saEsc(buildInjectText(world)||'— нет активной локации')}</div></div>`;
@@ -794,14 +830,22 @@ function buildMapTab(world,has) {
 
 function renderTile(loc,world) {
   const active=loc.id===world.currentLocationId;
-  // Characters visibly at this location — exclude those who are "at home" (away from scene)
   const charsHere=(world.characters||[]).filter(c=>c.locationId===loc.id && !c.isAtHome);
-  return `<div class="sa-tile${active?' sa-tile-active':''}" data-locid="${saEsc(loc.id)}">
+  const exits=(loc.connections||[]).map(cid=>world.locations.find(l=>l.id===cid)?.name).filter(Boolean);
+  return `<div class="sa-tile${active?' sa-tile-active':''}${loc.image?' sa-tile-has-img':''}" data-locid="${saEsc(loc.id)}">
     <button class="sa-tile-edit-btn" data-editid="${saEsc(loc.id)}"><i class="fa-solid fa-pen"></i></button>
     ${loc.image?`<div class="sa-tile-cover" style="background-image:url(${loc.image})"></div>`:`<div class="sa-tile-icon">${loc.icon||'📍'}</div>`}
     <div class="sa-tile-name">${saEsc(loc.name)}</div>
     ${charsHere.length?`<div class="sa-tile-chars">${charsHere.slice(0,5).map(c=>renderCharAvatarSmall(c)).join('')}</div>`:''}
     ${active?'<div class="sa-tile-active-dot"></div>':''}
+    <div class="sa-tile-tooltip">
+      <div class="sa-tooltip-title">${loc.icon||'📍'} ${saEsc(loc.name)}</div>
+      ${loc.atmosphere?`<div class="sa-tooltip-atm">«${saEsc(loc.atmosphere)}»</div>`:''}
+      ${loc.description?`<div class="sa-tooltip-desc">${saEsc(loc.description.slice(0,120))}${loc.description.length>120?'…':''}</div>`:''}
+      ${loc.items?.length?`<div class="sa-tooltip-items">${loc.items.slice(0,4).map(i=>`<span class="sa-tooltip-badge">${saEsc(i)}</span>`).join('')}</div>`:''}
+      ${exits.length?`<div class="sa-tooltip-exits">→ ${exits.join(' · ')}</div>`:''}
+      ${charsHere.length?`<div class="sa-tooltip-chars">👥 ${charsHere.map(c=>c.name==='{{user}}'?getUserName():c.name).join(', ')}</div>`:''}
+    </div>
   </div>`;
 }
 
@@ -889,16 +933,11 @@ function buildHomesTab(world) {
           ${home.description?`<div class="sa-home-desc">${saEsc(home.description)}</div>`:''}
           </div>
         </div>
-        <div class="sa-rooms-label">Комнаты <span class="sa-dim">(${(home.rooms||[]).length})</span></div>
-        <div class="sa-rooms-grid">
-          ${(home.rooms||[]).map(r=>`<div class="sa-room-tile">
-            <button class="sa-room-edit-btn" data-charid="${saEsc(c.id)}" data-roomid="${saEsc(r.id)}"><i class="fa-solid fa-pen"></i></button>
-            <div class="sa-room-icon">${r.icon||'🚪'}</div>
-            <div class="sa-room-name">${saEsc(r.name)}</div>
-            ${r.items?.length?`<div class="sa-room-items">${r.items.slice(0,2).map(i=>`<span class="sa-badge">${saEsc(i)}</span>`).join('')}</div>`:''}
-          </div>`).join('')}
-          <button class="sa-add-room-btn" data-charid="${saEsc(c.id)}" title="Добавить комнату"><i class="fa-solid fa-plus"></i></button>
-        </div>`
+        <div class="sa-floorplan-header">
+          <span class="sa-rooms-label">ПЛАН <span class="sa-dim">(${(home.rooms||[]).length} помещений)</span></span>
+          <button class="sa-add-room-btn-sm" data-charid="${saEsc(c.id)}" title="Добавить комнату"><i class="fa-solid fa-plus"></i> комната</button>
+        </div>
+        ${renderFloorPlan(home, c.id)}`
         :`<div class="sa-no-home">
           <span class="sa-dim">Жилище не добавлено</span>
          </div>`}
@@ -907,6 +946,162 @@ function buildHomesTab(world) {
 </div>`;
 }
 
+
+// ══════════════════════════════════════════════════════════
+//  РЕНДЕР ЧЕРТЕЖА ЖИЛИЩА (BLUEPRINT FLOOR PLAN)
+// ══════════════════════════════════════════════════════════
+
+function renderFloorPlan(home, charId) {
+  const rooms = home.rooms || [];
+  if (!rooms.length) return `<div class="sa-no-home"><span class="sa-dim">Комнат нет</span></div>`;
+
+  // Определяем размер сетки
+  const hasSpatial = rooms.some(r => r.col && r.row);
+  let gridCols = home.gridCols || 3;
+  let gridRows = home.gridRows || 2;
+
+  // Если у комнат нет координат — авто-раскладка
+  if (!hasSpatial) {
+    let c = 1, r = 1;
+    rooms.forEach(room => {
+      room._col = c; room._row = r;
+      room._cs = (room.span || room.colSpan || 1);
+      room._rs = (room.rowSpan || 1);
+      c += room._cs;
+      if (c > gridCols) { c = 1; r++; }
+    });
+    gridRows = r + 1;
+  } else {
+    rooms.forEach(room => {
+      room._col = room.col || 1;
+      room._row = room.row || 1;
+      room._cs = room.colSpan || 1;
+      room._rs = room.rowSpan || 1;
+    });
+  }
+
+  // Walltype → border style
+  const wallStyle = (wt) => {
+    if (wt === 'glass') return 'sa-wall-glass';
+    if (wt === 'open')  return 'sa-wall-open';
+    return '';
+  };
+
+  const roomsHtml = rooms.map(r => {
+    const col = r._col || r.col || 1;
+    const row = r._row || r.row || 1;
+    const cs  = r._cs  || r.colSpan || 1;
+    const rs  = r._rs  || r.rowSpan || 1;
+    const wall = wallStyle(r.wallType);
+    const hl = r.highlight ? 'sa-bp-highlight' : '';
+    return `<div class="sa-bp-room ${hl} ${wall}"
+      style="grid-column:${col}/span ${cs};grid-row:${row}/span ${rs}"
+      data-charid="${saEsc(charId)}" data-roomid="${saEsc(r.id)}">
+      <button class="sa-room-edit-btn" data-charid="${saEsc(charId)}" data-roomid="${saEsc(r.id)}"><i class="fa-solid fa-pen"></i></button>
+      <div class="sa-bp-icon">${r.icon||'🚪'}</div>
+      <div class="sa-bp-name">${saEsc(r.name)}${r.owner?`<span class="sa-bp-owner">(${saEsc(r.owner)})</span>`:''}</div>
+      ${r.description?`<div class="sa-bp-subdesc">${saEsc(r.description)}</div>`:''}
+      <div class="sa-bp-tooltip">
+        <div class="sa-bptt-title">${r.icon||'🚪'} ${saEsc(r.name)}</div>
+        ${r.owner?`<div class="sa-bptt-owner">👤 ${saEsc(r.owner)}</div>`:''}
+        ${r.description?`<div class="sa-bptt-desc">${saEsc(r.description)}</div>`:''}
+        ${r.items?.length?`<div class="sa-bptt-items">${r.items.map(i=>`<span class="sa-bptt-badge">${saEsc(i)}</span>`).join('')}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="sa-blueprint">
+    <div class="sa-bp-compass">С</div>
+    <div class="sa-bp-grid" style="grid-template-columns:repeat(${gridCols},1fr);grid-template-rows:repeat(${gridRows},1fr)">
+      ${roomsHtml}
+    </div>
+    <div class="sa-bp-scale"><span class="sa-bp-scale-line"></span>план</div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════
+//  РЕНДЕР ПРОСТРАНСТВЕННОЙ КАРТЫ МИРА (С SVG-СВЯЗЯМИ)
+// ══════════════════════════════════════════════════════════
+
+function renderSpatialMap(world) {
+  const locs = world.locations || [];
+  if (!locs.length) return '';
+
+  const hasSpatial = locs.some(l => l.mapCol && l.mapRow);
+
+  // Если у локаций нет координат — авто-сетка
+  if (!hasSpatial) {
+    locs.forEach((l, i) => {
+      l._mc = (i % 3) + 1;
+      l._mr = Math.floor(i / 3) + 1;
+    });
+  } else {
+    locs.forEach(l => { l._mc = l.mapCol || 1; l._mr = l.mapRow || 1; });
+  }
+
+  const maxCol = Math.max(...locs.map(l => l._mc));
+  const maxRow = Math.max(...locs.map(l => l._mr));
+  const CELL = 90; // px per cell
+  const W = maxCol * CELL;
+  const H = maxRow * CELL;
+  const HALF = CELL / 2;
+
+  // Строим SVG соединения
+  const connections = [];
+  const drawn = new Set();
+  locs.forEach(loc => {
+    (loc.connections || []).forEach(cid => {
+      const key = [loc.id, cid].sort().join('|');
+      if (drawn.has(key)) return;
+      drawn.add(key);
+      const target = locs.find(l => l.id === cid);
+      if (!target) return;
+      const x1 = (loc._mc - 1) * CELL + HALF;
+      const y1 = (loc._mr - 1) * CELL + HALF;
+      const x2 = (target._mc - 1) * CELL + HALF;
+      const y2 = (target._mr - 1) * CELL + HALF;
+      connections.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="sa-map-conn-line"/>`);
+    });
+  });
+
+  // Строим тайлы
+  const tiles = locs.map(loc => {
+    const active = loc.id === world.currentLocationId;
+    const charsHere = (world.characters||[]).filter(c => c.locationId === loc.id && !c.isAtHome);
+    const left = (loc._mc - 1) * CELL;
+    const top  = (loc._mr - 1) * CELL;
+    const exits = (loc.connections||[]).map(cid=>world.locations.find(l=>l.id===cid)?.name).filter(Boolean);
+    return `<div class="sa-smap-tile${active?' sa-smap-active':''}" data-locid="${saEsc(loc.id)}"
+      style="left:${left}px;top:${top}px;width:${CELL-8}px;height:${CELL-8}px">
+      <button class="sa-tile-edit-btn" data-editid="${saEsc(loc.id)}"><i class="fa-solid fa-pen"></i></button>
+      ${loc.image?`<div class="sa-tile-cover" style="background-image:url(${loc.image});border-radius:6px;position:absolute;inset:0;background-size:cover;background-position:center;z-index:0"></div>`:''}
+      <div class="sa-smap-icon" style="position:relative;z-index:1">${loc.icon||'📍'}</div>
+      <div class="sa-smap-name" style="position:relative;z-index:1">${saEsc(loc.name)}</div>
+      ${charsHere.length?`<div class="sa-smap-chars" style="position:relative;z-index:1">${charsHere.slice(0,3).map(c=>renderCharAvatarSmall(c)).join('')}</div>`:''}
+      ${active?'<div class="sa-tile-active-dot"></div>':''}
+      <div class="sa-tile-tooltip">
+        <div class="sa-tooltip-title">${loc.icon||'📍'} ${saEsc(loc.name)}</div>
+        ${loc.atmosphere?`<div class="sa-tooltip-atm">«${saEsc(loc.atmosphere)}»</div>`:''}
+        ${loc.description?`<div class="sa-tooltip-desc">${saEsc(loc.description.slice(0,120))}${loc.description.length>120?'…':''}</div>`:''}
+        ${loc.items?.length?`<div class="sa-tooltip-items">${loc.items.slice(0,4).map(i=>`<span class="sa-tooltip-badge">${saEsc(i)}</span>`).join('')}</div>`:''}
+        ${exits.length?`<div class="sa-tooltip-exits">→ ${exits.join(' · ')}</div>`:''}
+        ${charsHere.length?`<div class="sa-tooltip-chars">👥 ${charsHere.map(c=>c.name==='{{user}}'?getUserName():c.name).join(', ')}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="sa-smap-wrap">
+    <div class="sa-smap-container" style="width:${W}px;height:${H}px">
+      <svg class="sa-smap-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0;width:${W}px;height:${H}px;overflow:visible;pointer-events:none">
+        <defs>
+          <filter id="sa-glow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        ${connections.join('')}
+      </svg>
+      ${tiles}
+    </div>
+  </div>`;
+}
 
 function buildSettingsTab() {
   const s=getSettings(), gen=s.gen;
@@ -1111,7 +1306,18 @@ function buildRoomEditorHTML(charId, roomId) {
   <input type="hidden" id="sa-rm-icon" value="${saEsc(room?.icon||'🚪')}">
   <label>Название *</label><input id="sa-rm-name" type="text" placeholder="Гостиная..." value="${saEsc(room?.name||'')}">
   <label>Описание</label><input id="sa-rm-desc" type="text" value="${saEsc(room?.description||'')}">
+  <label>Хозяин комнаты <span class="sa-hint">чья это комната</span></label><input id="sa-rm-owner" type="text" placeholder="Имя персонажа..." value="${saEsc(room?.owner||'')}">
   <label>Предметы <span class="sa-hint">каждый с новой строки</span></label><textarea id="sa-rm-items" rows="3">${saEsc((room?.items||[]).join('\n'))}</textarea>
+  <div style="display:flex;gap:10px;margin-top:4px">
+    <label class="sa-chk-label" style="flex:1">
+      <input type="checkbox" id="sa-rm-highlight" ${room?.highlight?'checked':''}>
+      <div><div style="font-size:0.78rem">✨ Ключевая комната</div><div class="sa-hint">Выделить цветной рамкой</div></div>
+    </label>
+    <label class="sa-chk-label" style="flex:1">
+      <input type="checkbox" id="sa-rm-span2" ${(room?.span||1)>=2?'checked':''}>
+      <div><div style="font-size:0.78rem">↔️ Широкая</div><div class="sa-hint">Занимает 2 ячейки</div></div>
+    </label>
+  </div>
   ${room?`<button type="button" id="sa-rm-delete" class="sa-btn-danger">🗑 Удалить</button>`:''}
 </div>`;
 }
@@ -1267,17 +1473,19 @@ async function openRoomEditorPopup(charId, roomId) {
   const world=getWorld(), char=world.characters.find(c=>c.id===charId); if (!char) return;
   if (!char.home) char.home={icon:'🏠',name:'',description:'',rooms:[]};
   const room=roomId?char.home.rooms?.find(r=>r.id===roomId):null;
-  const fs={icon:room?.icon||'🚪',name:room?.name||'',desc:room?.description||'',items:(room?.items||[]).join('\n')};
+  const fs={icon:room?.icon||'🚪',name:room?.name||'',desc:room?.description||'',items:(room?.items||[]).join('\n'),owner:room?.owner||'',highlight:!!room?.highlight,span:room?.span||1};
   const popup=new Popup(buildRoomEditorHTML(charId,roomId),POPUP_TYPE.CONFIRM,'',{okButton:roomId?'💾 Сохранить':'➕ Добавить',cancelButton:'Отмена'});
   requestAnimationFrame(()=>{
     patchSTPopup('.sa-editor-inner');
     document.querySelector('.sa-editor-inner .sa-editor-close-btn')?.addEventListener('click', () => popup.complete(false));
-    wireIcons('.sa-icon-opt',v=>{fs.icon=v;}); wireInput('sa-rm-name','name',fs); wireInput('sa-rm-desc','desc',fs); wireInput('sa-rm-items','items',fs);
+    wireIcons('.sa-icon-opt',v=>{fs.icon=v;}); wireInput('sa-rm-name','name',fs); wireInput('sa-rm-desc','desc',fs); wireInput('sa-rm-items','items',fs); wireInput('sa-rm-owner','owner',fs);
+    document.getElementById('sa-rm-highlight')?.addEventListener('change',e=>{fs.highlight=e.target.checked;});
+    document.getElementById('sa-rm-span2')?.addEventListener('change',e=>{fs.span=e.target.checked?2:1;});
     document.getElementById('sa-rm-delete')?.addEventListener('click',()=>{popup.complete(null);if(!confirm('Удалить?'))return;char.home.rooms=(char.home.rooms||[]).filter(r=>r.id!==roomId);saveWorld(world);showToast('✓ Удалена');refreshMain();});
   });
   const result=await popup.show(); if (!result) return;
   if (!fs.name.trim()) { showToast('✗ Введите название',true); return; }
-  const rData={icon:fs.icon,name:fs.name.trim(),description:fs.desc.trim(),items:fs.items.split('\n').map(s=>s.trim()).filter(Boolean)};
+  const rData={icon:fs.icon,name:fs.name.trim(),description:fs.desc.trim(),items:fs.items.split('\n').map(s=>s.trim()).filter(Boolean),owner:fs.owner.trim()||null,highlight:fs.highlight,span:fs.span};
   if (room) Object.assign(room,rData);
   else { char.home.rooms=char.home.rooms||[]; char.home.rooms.push({id:`room_${Date.now()}`,...rData}); }
   saveWorld(world); showToast('✓ Сохранено'); refreshMain();
@@ -1394,7 +1602,7 @@ function bindMainEvents() {
       _activeTab=tab.dataset.tab;
     });
   });
-  document.querySelectorAll('.sa-tile').forEach(tile=>{tile.addEventListener('click',e=>{if(e.target.closest('.sa-tile-edit-btn'))return;openLocationPopup(tile.dataset.locid);});});
+  document.querySelectorAll('.sa-tile, .sa-smap-tile').forEach(tile=>{tile.addEventListener('click',e=>{if(e.target.closest('.sa-tile-edit-btn'))return;openLocationPopup(tile.dataset.locid);});});
   document.querySelectorAll('.sa-tile-edit-btn').forEach(btn=>{btn.addEventListener('click',e=>{e.stopPropagation();openLocationEditorPopup(btn.dataset.editid);});});
   document.getElementById('sa-btn-add-loc')?.addEventListener('click',()=>openLocationEditorPopup(null));
   document.getElementById('sa-add-char')?.addEventListener('click',()=>openCharEditorPopup(null));
@@ -1410,8 +1618,8 @@ function bindMainEvents() {
     });
   });
   document.querySelectorAll('.sa-home-edit-btn').forEach(btn=>{btn.addEventListener('click',()=>openHomeEditorPopup(btn.dataset.charid));});
-  document.querySelectorAll('.sa-add-room-btn').forEach(btn=>{btn.addEventListener('click',()=>openRoomEditorPopup(btn.dataset.charid,null));});
-  document.querySelectorAll('.sa-room-edit-btn').forEach(btn=>{btn.addEventListener('click',()=>openRoomEditorPopup(btn.dataset.charid,btn.dataset.roomid));});
+  document.querySelectorAll('.sa-add-room-btn-sm, .sa-floorplan-add').forEach(btn=>{btn.addEventListener('click',()=>openRoomEditorPopup(btn.dataset.charid,null));});
+  document.querySelectorAll('.sa-room-edit-btn, .sa-bp-room .sa-room-edit-btn').forEach(btn=>{btn.addEventListener('click',e=>{e.stopPropagation();openRoomEditorPopup(btn.dataset.charid,btn.dataset.roomid);});});
 
   // Сохранение пожеланий к жилищам
   document.getElementById('sa-homes-wish')?.addEventListener('input', e => saveGenSetting('homesWish', e.target.value));
@@ -1452,11 +1660,20 @@ function bindMainEvents() {
             name: r.name || 'Комната',
             description: r.description || '',
             items: r.items || [],
+            owner: r.owner || null,
+            highlight: !!r.highlight,
+            wallType: r.wallType || 'solid',
+            col: r.col || null,
+            row: r.row || null,
+            colSpan: r.colSpan || 1,
+            rowSpan: r.rowSpan || 1,
           }));
           char.home = {
             icon: h.home.icon || '🏠',
             name: h.home.name || 'Дом',
             description: h.home.description || '',
+            gridCols: h.home.gridCols || null,
+            gridRows: h.home.gridRows || null,
             rooms,
           };
         }
@@ -1487,7 +1704,17 @@ function bindMainEvents() {
               icon: h.home.icon || '🏠',
               name: h.home.name || 'Дом',
               description: h.home.description || '',
-              rooms: (h.home.rooms||[]).map((r,i) => ({id:`room_${Date.now()}_${i}`,icon:r.icon||'🚪',name:r.name||'Комната',description:r.description||'',items:r.items||[]})),
+              gridCols: h.home.gridCols || null,
+              gridRows: h.home.gridRows || null,
+              rooms: (h.home.rooms||[]).map((r,i) => ({
+                id:`room_${Date.now()}_${i}`,
+                icon:r.icon||'🚪', name:r.name||'Комната',
+                description:r.description||'', items:r.items||[],
+                owner:r.owner||null, highlight:!!r.highlight,
+                wallType:r.wallType||'solid',
+                col:r.col||null, row:r.row||null,
+                colSpan:r.colSpan||1, rowSpan:r.rowSpan||1,
+              })),
             };
           }
         }
