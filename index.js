@@ -8,7 +8,7 @@
 // ═══════════════════════════════════════════════════════════
 
 import { extension_settings } from '../../../extensions.js';
-import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
+import { eventSource, event_types, saveSettingsDebounced, setExtensionPrompt, extension_prompt_types } from '../../../../script.js';
 import { Popup, POPUP_TYPE } from '../../../popup.js';
 
 const EXT_NAME = 'sora_atlas';
@@ -92,7 +92,12 @@ function migrateWorld(w) {
   return w;
 }
 
-function saveWorld(world) { getSettings().worlds[getChatId()] = world; saveSettingsDebounced(); }
+function saveWorld(world) {
+  getSettings().worlds[getChatId()] = world;
+  saveSettingsDebounced();
+  // Обновляем инжект при каждом сохранении карты
+  try { updatePromptInjection(); } catch {}
+}
 
 // ══════════════════════════════════════════════════════════
 //  ОБОИ ST
@@ -207,9 +212,15 @@ function renderCharAvatarSmall(char) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  УМНЫЙ ИНЖЕКТ
-//  Компактный, 3-5 строк. Содержит инструкцию для AI.
+//  УМНЫЙ ИНЖЕКТ v2 — ТЕГОВО-КОМАНДНАЯ СИСТЕМА
+//  AI сигнализирует через теги в конце ответа:
+//  <atlas:move id="loc_1"/> или <atlas:move name="Кофейня"/>
+//  <atlas:newloc name="..." icon="☕" desc="..."/>
+//  <atlas:time value="вечер"/>
+//  <atlas:char name="Никита" loc="loc_2"/>
 // ══════════════════════════════════════════════════════════
+
+const TIME_OF_DAY = ['раннее утро','утро','день','вечер','ночь','поздняя ночь'];
 
 function buildInjectText(world) {
   if (!world?.locations?.length) return null;
@@ -218,84 +229,173 @@ function buildInjectText(world) {
   if (!loc) return null;
 
   const lines = [];
+  const userName = getUserName();
 
-  // ── Строка 1: Текущая локация ─────────────────────────
-  // Персонажи здесь (исключаем тех кто "дома" — isAtHome)
+  // ── Текущая локация ────────────────────────────────────
   const charsHere = (world.characters || [])
     .filter(c => c.locationId === loc.id && !c.isAtHome)
-    .map(c => c.name === '{{user}}' ? getUserName() : c.name);
+    .map(c => c.name === '{{user}}' ? userName : c.name);
   const exits = (loc.connections || [])
-    .map(cid => world.locations.find(l => l.id === cid)?.name).filter(Boolean);
+    .map(cid => { const l=world.locations.find(l=>l.id===cid); return l?`${l.name}[${l.id}]`:null; }).filter(Boolean);
 
-  const p = [`📍 ${loc.name}`];
-  if (loc.atmosphere)        p.push(`«${loc.atmosphere}»`);
-  if (loc.items?.length)     p.push(`[${loc.items.slice(0,4).join(', ')}]`);
-  if (charsHere.length)      p.push(`Здесь: ${charsHere.join(', ')}`);
+  const p = [`📍 ${loc.name}[${loc.id}]`];
+  if (loc.atmosphere)          p.push(`«${loc.atmosphere}»`);
+  if (loc.items?.length)       p.push(`[${loc.items.slice(0,4).join(', ')}]`);
+  if (charsHere.length)        p.push(`Здесь: ${charsHere.join(', ')}`);
   if (loc.visitableNpcs?.length) p.push(`Встретить: ${loc.visitableNpcs.join(', ')}`);
-  if (exits.length)          p.push(`→ ${exits.join(' / ')}`);
+  if (exits.length)            p.push(`Выходы: ${exits.join(' / ')}`);
+  if (world._timeOfDay)        p.push(`⏰ ${world._timeOfDay}`);
   lines.push(`[ЛОКАЦИЯ: ${p.join(' | ')}]`);
 
-  // ── Строка 2: Где остальные персонажи ─────────────────
+  // ── Другие персонажи ───────────────────────────────────
   const elsewhere = (world.characters || [])
     .filter(c => c.locationId && c.locationId !== loc.id && !c.isAtHome)
     .map(c => {
-      const ln = world.locations.find(l => l.id === c.locationId)?.name || '?';
-      return `${c.name === '{{user}}' ? getUserName() : c.name}→${ln}`;
-    });
+      const ln = world.locations.find(l=>l.id===c.locationId);
+      const n = c.name==='{{user}}' ? userName : c.name;
+      return ln ? `${n}→${ln.name}` : null;
+    }).filter(Boolean);
   if (elsewhere.length) lines.push(`[ДРУГИЕ: ${elsewhere.join(' | ')}]`);
 
-  // ── Строка 2б: Кто сейчас дома ────────────────────────
-  const atHome = (world.characters || []).filter(c => c.isAtHome && c.home);
-  if (atHome.length) {
-    const homeList = atHome.map(c => {
-      const n = c.name === '{{user}}' ? getUserName() : c.name;
-      return `${n} (${c.home.name||'дом'})`;
-    }).join(', ');
-    lines.push(`[ДОМА: ${homeList} — недоступны на текущей локации]`);
-  }
+  // ── Кто дома ──────────────────────────────────────────
+  const atHome = (world.characters||[]).filter(c=>c.isAtHome&&c.home);
+  if (atHome.length) lines.push(`[ДОМА: ${atHome.map(c=>{const n=c.name==='{{user}}'?userName:c.name;return `${n}(${c.home.name||'дом'})`;}).join(', ')}]`);
 
-  // ── Строка 3: Жилище если персонаж дома ───────────────
+  // ── Жилище ────────────────────────────────────────────
   if (s.injectHome) {
-    for (const owner of (world.characters || []).filter(c => c.isAtHome && c.home)) {
-      const h = owner.home;
-      if (!h?.rooms?.length) continue;
-      const oName = owner.name === '{{user}}' ? getUserName() : owner.name;
-      const rList = h.rooms.map(r => {
-        const itms = r.items?.length ? `(${r.items.slice(0,3).join(', ')})` : '';
-        return `${r.icon||''}${r.name}${itms}`;
-      }).join(', ');
-      lines.push(`[ЖИЛИЩЕ ${oName}: ${h.name || 'дом'} — ${rList}]`);
-    }
-    // Старая логика — персонаж в локации с жилищем (для совместимости)
-    for (const owner of (world.characters || []).filter(c => c.home && c.locationId === loc.id && !c.isAtHome)) {
-      const h = owner.home;
-      if (!h?.rooms?.length) continue;
-      const oName = owner.name === '{{user}}' ? getUserName() : owner.name;
-      const rList = h.rooms.map(r => {
-        const itms = r.items?.length ? `(${r.items.slice(0,3).join(', ')})` : '';
-        return `${r.icon||''}${r.name}${itms}`;
-      }).join(', ');
-      lines.push(`[ЖИЛИЩЕ ${oName}: ${h.name || 'дом'} — ${rList}]`);
+    const homeOwners = [
+      ...(world.characters||[]).filter(c=>c.isAtHome&&c.home),
+      ...(world.characters||[]).filter(c=>c.home&&c.locationId===loc.id&&!c.isAtHome),
+    ];
+    for (const owner of homeOwners) {
+      const h=owner.home; if(!h?.rooms?.length) continue;
+      const oName=owner.name==='{{user}}'?userName:owner.name;
+      const rList=h.rooms.map(r=>`${r.icon||''}${r.name}${r.items?.length?`(${r.items.slice(0,2).join(',')})`:''}`).join(', ');
+      lines.push(`[ЖИЛИЩЕ ${oName}: ${h.name||'дом'} — ${rList}]`);
     }
   }
 
-  // ── Строка 4: Инструкция для AI ───────────────────────
-  lines.push(`[КАРТА-ИНСТРУКЦИЯ: Учитывай эту локацию при описании сцены — её предметы, атмосферу, присутствующих персонажей. При переходе в другое место описывай его детали.]`);
+  // ── Инструкция — ГЛАВНАЯ ЧАСТЬ ────────────────────────
+  // Список всех локаций для навигации
+  const locList = (world.locations||[]).map(l=>`${l.name}→${l.id}`).join(', ');
+  const allChars = (world.characters||[]).map(c=>{
+    const n=c.name==='{{user}}'?userName:c.name;
+    const ln=world.locations.find(l=>l.id===c.locationId)?.name||'?';
+    return `${n}(сейчас:${ln},id:${c.id})`;
+  }).join(', ');
+
+  lines.push(`[АТЛАС-КАРТА: Локации на карте: ${locList}]`);
+  lines.push(`[АТЛАС-ПЕРСЫ: ${allChars}]`);
+  lines.push(`[АТЛАС-ИНСТРУКЦИЯ: Когда в сцене происходит переход в другое место — в САМОМ КОНЦЕ своего ответа добавь тег (не показывай его читателю, он невидим):
+  Переход в существующую локацию: <atlas:move id="ИД_ЛОКАЦИИ"/>
+  Переход в новое место которого нет на карте: <atlas:newloc name="Название" icon="🏠" desc="Одно предложение описания"/>
+  Смена времени суток: <atlas:time value="утро|день|вечер|ночь"/>
+  Персонаж переместился отдельно: <atlas:char name="ИмяПерсонажа" locid="ИД_ЛОКАЦИИ"/>
+  Используй реальные id из АТЛАС-КАРТА. Теги ставь только когда место действительно меняется.]`);
 
   return lines.join('\n');
 }
 
-function onBeforeCombinePrompts(chat) {
-  if (!getSettings().enabled) return;
-  const inject = buildInjectText(getWorld());
-  if (!inject) return;
-  const arr = Array.isArray(chat) ? chat : (chat?.chat ?? null);
-  if (arr) arr.splice(1, 0, { role:'system', content:inject });
+const PROMPT_KEY = EXT_NAME + '_injection';
+
+// Обновляет инжект через официальный ST API — работает в думалке и везде
+function updatePromptInjection() {
+  const s = getSettings();
+  const inject = s.enabled ? (buildInjectText(getWorld()) || '') : '';
+  try {
+    setExtensionPrompt(PROMPT_KEY, inject, extension_prompt_types.IN_CHAT, 0);
+  } catch(e) {
+    // Fallback если API недоступен
+    console.warn('[СораАтлас] setExtensionPrompt недоступен:', e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
-//  АВТО-ТРЕКИНГ ДВИЖЕНИЯ ИЗ ТЕКСТА AI
-//  Парсит ответы на глаголы движения → предлагает обновить карту
+//  ПАРСЕР ТЕГОВ ИЗ ОТВЕТА AI
+//  Надёжный детерминированный парсинг вместо NLP
+// ══════════════════════════════════════════════════════════
+
+function parseAtlasTags(text) {
+  const results = { moves:[], newlocs:[], timeChange:null, charMoves:[] };
+  if (!text) return results;
+
+  // <atlas:move id="loc_1"/> или <atlas:move name="Кофейня"/>
+  const moveRx = /<atlas:move\s+(?:id="([^"]+)"|name="([^"]+)")\s*\/>/gi;
+  let m;
+  while ((m=moveRx.exec(text))!==null) results.moves.push({id:m[1]||null, name:m[2]||null});
+
+  // <atlas:newloc name="..." icon="☕" desc="..."/>
+  const newlocRx = /<atlas:newloc\s+name="([^"]+)"(?:\s+icon="([^"]+)")?(?:\s+desc="([^"]+)")?\s*\/>/gi;
+  while ((m=newlocRx.exec(text))!==null) results.newlocs.push({name:m[1], icon:m[2]||'📍', desc:m[3]||''});
+
+  // <atlas:time value="вечер"/>
+  const timeRx = /<atlas:time\s+value="([^"]+)"\s*\/>/i;
+  m = timeRx.exec(text);
+  if (m) results.timeChange = m[1];
+
+  // <atlas:char name="Никита" locid="loc_2"/>
+  const charRx = /<atlas:char\s+name="([^"]+)"\s+locid="([^"]+)"\s*\/>/gi;
+  while ((m=charRx.exec(text))!==null) results.charMoves.push({name:m[1], locId:m[2]});
+
+  return results;
+}
+
+function applyAtlasTags(tags, world) {
+  if (!world) return false;
+  let changed = false;
+  const userName = getUserName();
+
+  // Переход в локацию
+  for (const mv of tags.moves) {
+    let loc = mv.id ? world.locations.find(l=>l.id===mv.id) : null;
+    if (!loc && mv.name) loc = world.locations.find(l=>l.name.toLowerCase()===mv.name.toLowerCase());
+    if (loc && loc.id !== world.currentLocationId) {
+      world.currentLocationId = loc.id;
+      // Двигаем всех персонажей которые были на текущей локации (user точно)
+      const user = world.characters.find(c=>c.id==='u_user');
+      if (user && !user.isAtHome) user.locationId = loc.id;
+      changed = true;
+    }
+  }
+
+  // Новая локация
+  for (const nl of tags.newlocs) {
+    const exists = world.locations.find(l=>l.name.toLowerCase()===nl.name.toLowerCase());
+    if (!exists) {
+      const newId = `loc_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+      world.locations.push({
+        id:newId, name:nl.name, icon:nl.icon, description:nl.desc,
+        atmosphere:'', items:[], connections:[], visitableNpcs:[],
+        _autoAdded:true,
+      });
+      world.currentLocationId = newId;
+      const user = world.characters.find(c=>c.id==='u_user');
+      if (user && !user.isAtHome) user.locationId = newId;
+      changed = true;
+    }
+  }
+
+  // Смена времени
+  if (tags.timeChange) {
+    world._timeOfDay = tags.timeChange;
+    changed = true;
+  }
+
+  // Движение других персонажей
+  for (const cm of tags.charMoves) {
+    const char = world.characters.find(c=>{
+      const n=c.name==='{{user}}'?userName:c.name;
+      return n.toLowerCase()===cm.name.toLowerCase();
+    });
+    const loc = world.locations.find(l=>l.id===cm.locId);
+    if (char && loc) { char.locationId=loc.id; changed=true; }
+  }
+
+  return changed;
+}
+
+// ══════════════════════════════════════════════════════════
+//  ХЕЛПЕР — движение из текста AI (старый NLP как фолбэк)
 // ══════════════════════════════════════════════════════════
 
 const MOVE_VERB_PATTERN = [
@@ -320,40 +420,27 @@ const MOVE_VERB_PATTERN = [
 
 function rxEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-function detectMovements(text, world) {
+function detectMovementsNLP(text, world) {
   if (!text || !world?.locations?.length || !world?.characters?.length) return [];
-
-  const chars = (world.characters || []).filter(c => {
-    const n = c.name === '{{user}}' ? getUserName() : c.name;
-    return n && n.length > 1;
-  });
+  const chars = (world.characters || []).filter(c => { const n = c.name === '{{user}}' ? getUserName() : c.name; return n && n.length > 1; });
   const locNames = world.locations.map(l => l.name).filter(n => n && n.length > 1);
   if (!chars.length || !locNames.length) return [];
-
   const moves = [];
   const locsRx = locNames.map(rxEsc).join('|');
-
   for (const char of chars) {
     const charName = char.name === '{{user}}' ? getUserName() : char.name;
     const nameRx = rxEsc(charName);
-    // Паттерн: [Имя] ... глагол ... (в|на|к) ... [Локация]  в пределах 120 символов
-    const rx = new RegExp(
-      `${nameRx}[^.!?\\n]{0,80}(?:${MOVE_VERB_PATTERN})[^.!?\\n]{0,25}(?:в|на|к|до)\\s+(${locsRx})`,
-      'iu'
-    );
+    const rx = new RegExp(`${nameRx}[^.!?\\n]{0,80}(?:${MOVE_VERB_PATTERN})[^.!?\\n]{0,25}(?:в|на|к|до)\\s+(${locsRx})`, 'iu');
     const m = rx.exec(text);
     if (m) {
-      const locName = m[1];
-      const loc = world.locations.find(l => l.name.toLowerCase() === locName.toLowerCase());
-      if (loc && loc.id !== char.locationId) {
-        moves.push({ charId: char.id, charName, locId: loc.id, locName: loc.name });
-      }
+      const loc = world.locations.find(l => l.name.toLowerCase() === m[1].toLowerCase());
+      if (loc && loc.id !== char.locationId) moves.push({ charId: char.id, charName, locId: loc.id, locName: loc.name });
     }
   }
   return moves;
 }
 
-// Тост подтверждения движений
+// ── ТОСТ движения (для NLP-фолбэка) ───────────────────────
 let _pendingMoves = [];
 function showMovementToast(moves, world) {
   if (!moves.length) return;
@@ -376,8 +463,7 @@ function showMovementToast(moves, world) {
     saveWorld(w); applyLocationWallpaper(w);
     const prev = document.getElementById('sa-inject-preview');
     if (prev) prev.textContent = buildInjectText(w) || '';
-    showToast('✓ Карта обновлена');
-    _pendingMoves = [];
+    showToast('✓ Карта обновлена'); _pendingMoves = [];
     el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(), 300);
   });
   el.querySelector('#sa-move-no')?.addEventListener('click', () => {
@@ -386,37 +472,109 @@ function showMovementToast(moves, world) {
   setTimeout(() => { if (document.body.contains(el)) { el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(),300); } }, 9000);
 }
 
+// ── ТОСТ новой локации ────────────────────────────────────
+function showNewLocToast(newloc) {
+  document.getElementById('sa-newloc-toast')?.remove();
+  const el = document.createElement('div');
+  el.id = 'sa-newloc-toast';
+  el.className = 'sa-move-toast sa-newloc-toast';
+  el.innerHTML = `<div class="sa-move-icon">${newloc.icon||'📍'}</div>
+    <div class="sa-move-body">
+      <div class="sa-move-title">Новое место добавлено</div>
+      <div class="sa-move-detail"><b>${newloc.name}</b>${newloc.desc?`<br><span style="opacity:.7;font-size:.72rem">${newloc.desc}</span>`:''}</div>
+    </div>
+    <div class="sa-move-btns"><button id="sa-newloc-ok">✓</button></div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('sa-move-show'));
+  el.querySelector('#sa-newloc-ok')?.addEventListener('click', () => {
+    el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(), 300);
+  });
+  setTimeout(() => { if (document.body.contains(el)) { el.classList.remove('sa-move-show'); setTimeout(()=>el.remove(),300); } }, 6000);
+}
+
+// ── ТОСТ смены времени ────────────────────────────────────
+function showTimeToast(timeVal) {
+  document.getElementById('sa-time-toast')?.remove();
+  const icons = {утро:'🌅',день:'☀️',вечер:'🌆',ночь:'🌙','раннее утро':'🌄','поздняя ночь':'🌃'};
+  const icon = Object.entries(icons).find(([k])=>timeVal.includes(k))?.[1] || '⏰';
+  const el = document.createElement('div');
+  el.id = 'sa-time-toast';
+  el.className = 'sa-toast sa-toast-ok';
+  el.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;opacity:1;transition:opacity 0.3s;padding:8px 20px;display:flex;align-items:center;gap:8px;border-radius:20px;pointer-events:none;white-space:nowrap';
+  el.innerHTML = `${icon} <span style="font-size:.8rem">${timeVal}</span>`;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity='0'; setTimeout(()=>el.remove(),300); }, 3000);
+}
+
+// ══════════════════════════════════════════════════════════
+//  ГЛАВНЫЙ ОБРАБОТЧИК — после каждого сообщения AI
+// ══════════════════════════════════════════════════════════
+
 function onCharacterMessageRendered(data) {
   const s = getSettings();
   if (!s.enabled || !s.autoTrackMovement) return;
   const world = getWorld();
   if (!world?.locations?.length) return;
 
-  // Авто-синхронизируем юзера к текущей локации если у него нет позиции
   syncUserToCurrentLocation(world);
 
-  // Читаем последние N сообщений ТОЛЬКО от AI (не от юзера)
-  const n = s.contextMessages || 15;
-  let text = '';
+  // Читаем ТОЛЬКО последнее сообщение AI (не историю — теги должны быть свежими)
+  let lastText = '';
   try {
     const ctx = getCtx();
     const chat = ctx.chat || [];
-    // Берём только AI-сообщения (is_user === false)
-    const aiMessages = chat.filter(m => !m.is_user && !m.is_system).slice(-n);
-    text = aiMessages.map(m => m.mes || '').join('\n');
+    const lastAI = [...chat].reverse().find(m => !m.is_user && !m.is_system);
+    lastText = lastAI?.mes || '';
 
-    // Fallback — DOM последнего рендеренного сообщения
-    if (!text) {
+    // Fallback — DOM
+    if (!lastText) {
       const msgId = typeof data === 'object' ? data?.messageId : data;
       if (msgId != null) {
         const el = document.querySelector(`[mesid="${msgId}"] .mes_text`);
-        text = el?.innerText || el?.textContent || '';
+        lastText = el?.innerText || el?.textContent || '';
       }
     }
   } catch {}
 
-  if (!text) return;
-  const moves = detectMovements(text, world);
+  if (!lastText) return;
+
+  // 1. Парсим теги — приоритет над NLP
+  const tags = parseAtlasTags(lastText);
+  const hasTags = tags.moves.length || tags.newlocs.length || tags.timeChange || tags.charMoves.length;
+
+  if (hasTags) {
+    const changed = applyAtlasTags(tags, world);
+
+    if (changed) {
+      saveWorld(world);
+      applyLocationWallpaper(world);
+      refreshMain();
+
+      // Уведомления
+      for (const nl of tags.newlocs) {
+        showNewLocToast(nl);
+        showToast(`📍 Новое место: ${nl.name}`);
+      }
+      if (tags.timeChange) showTimeToast(tags.timeChange);
+      if (tags.moves.length) {
+        const loc = world.locations.find(l=>l.id===world.currentLocationId);
+        if (loc) showToast(`📍 → ${loc.name}`);
+      }
+    }
+    return; // Теги нашли — NLP не нужен
+  }
+
+  // 2. Фолбэк — старый NLP для моделей которые не умеют теги
+  const n = s.contextMessages || 15;
+  let nlpText = '';
+  try {
+    const ctx = getCtx();
+    const chat = ctx.chat || [];
+    const aiMessages = chat.filter(m => !m.is_user && !m.is_system).slice(-n);
+    nlpText = aiMessages.map(m => m.mes || '').join('\n');
+  } catch {}
+
+  const moves = detectMovementsNLP(nlpText || lastText, world);
   if (moves.length) showMovementToast(moves, world);
 }
 
@@ -762,7 +920,8 @@ function buildMainHTML() {
     <span class="sa-frame-bar-title">Карта Мира &middot; СораАтлас</span>
     <div class="sa-frame-status">
       <div class="sa-status-dot"></div>
-      <span class="sa-frame-ver">v1.0.0</span>
+      <span class="sa-frame-ver">v2.0.0</span>
+      <button class="sa-help-btn" id="sa-btn-help" title="Справка и быстрая настройка">?</button>
       <button class="sa-close-btn" id="sa-btn-close" title="Закрыть">✕</button>
     </div>
   </div>
@@ -1091,14 +1250,16 @@ function renderSpatialMap(world) {
   }).join('');
 
   return `<div class="sa-smap-wrap">
-    <div class="sa-smap-container" style="width:${W}px;height:${H}px">
-      <svg class="sa-smap-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0;width:${W}px;height:${H}px;overflow:visible;pointer-events:none">
-        <defs>
-          <filter id="sa-glow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        </defs>
-        ${connections.join('')}
-      </svg>
-      ${tiles}
+    <div class="sa-smap-outer">
+      <div class="sa-smap-container" style="width:${W}px;height:${H}px">
+        <svg class="sa-smap-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0;width:${W}px;height:${H}px;overflow:visible;pointer-events:none">
+          <defs>
+            <filter id="sa-glow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          ${connections.join('')}
+        </svg>
+        ${tiles}
+      </div>
     </div>
   </div>`;
 }
@@ -1330,20 +1491,27 @@ function buildRoomEditorHTML(charId, roomId) {
 function patchSTPopup(rootSelector) {
   const root = document.querySelector(rootSelector);
   if (!root) return;
-  // Only strip styles on the immediate ST popup wrapper elements, NOT beyond
-  // Stop at known ST popup container boundaries to avoid resizing the whole UI
-  const ST_STOP_CLASSES = ['dialogue_popup', 'popup', 'shadow_popup', 'draggable', 'popup_content'];
+  // Only strip styles on immediate ST wrapper elements — max 4 levels up
+  // This avoids touching shared ST overlays that affect other popups
+  const ST_STOP_CLASSES = ['dialogue_popup', 'popup', 'shadow_popup', 'draggable'];
   let el = root.parentElement;
-  for (let i = 0; i < 5 && el; i++) {
-    // Stop if we've hit an ST structural container
-    if (ST_STOP_CLASSES.some(cls => el.classList?.contains(cls))) break;
-    if (el.id === 'sa-modal' || el.id === 'sa-loc-popup') break;
-    el.style.setProperty('background',   'transparent', 'important');
-    el.style.setProperty('border',       'none',        'important');
-    el.style.setProperty('box-shadow',   'none',        'important');
-    el.style.setProperty('padding',      '0',           'important');
-    el.style.setProperty('border-radius','0',           'important');
-    // Do NOT set overflow:visible — this can resize the ST window
+  for (let i = 0; i < 4 && el && el.tagName !== 'BODY'; i++) {
+    if (ST_STOP_CLASSES.some(cls => el.classList?.contains(cls))) {
+      // Found the ST popup container — strip only THIS element's visual styles
+      el.style.setProperty('background',    'transparent', 'important');
+      el.style.setProperty('border',        'none',        'important');
+      el.style.setProperty('box-shadow',    'none',        'important');
+      el.style.setProperty('outline',       'none',        'important');
+      el.style.setProperty('padding',       '0',           'important');
+      el.style.setProperty('border-radius', '0',           'important');
+      break;
+    }
+    el.style.setProperty('background',    'transparent', 'important');
+    el.style.setProperty('border',        'none',        'important');
+    el.style.setProperty('box-shadow',    'none',        'important');
+    el.style.setProperty('outline',       'none',        'important');
+    el.style.setProperty('padding',       '0',           'important');
+    el.style.setProperty('border-radius', '0',           'important');
     el = el.parentElement;
   }
   const theme = getSettings().theme || 'dark';
@@ -1527,46 +1695,251 @@ async function openLocationPopup(locId) {
 // ══════════════════════════════════════════════════════════
 
 let currentMainPopup=null;
+let _okObserver=null;
+let _okInterval=null;
+
+function _nukeMainOK() {
+  // Only kill panels near .sa-popup-host — our main popup's container
+  // Panels next to .sa-editor-inner are Save/Cancel — leave them alone
+  document.querySelectorAll('.sa-popup-host ~ .popup_button_panel, .sa-popup-host + .popup_button_panel').forEach(p => {
+    p.style.setProperty('display', 'none', 'important');
+    p.style.setProperty('height', '0', 'important');
+    p.style.setProperty('visibility', 'hidden', 'important');
+    p.style.setProperty('pointer-events', 'none', 'important');
+  });
+  // Also catch panels directly inside popup-host
+  document.querySelectorAll('.sa-popup-host > .popup_button_panel').forEach(p => {
+    p.style.setProperty('display', 'none', 'important');
+    p.style.setProperty('height', '0', 'important');
+  });
+}
+
 async function showMainPopup() {
   currentMainPopup=new Popup(buildMainHTML(),POPUP_TYPE.TEXT,'',{wide:true,allowVerticalScrolling:true});
   requestAnimationFrame(()=>{
     bindMainEvents();
     const modal = document.getElementById('sa-modal');
-    if (modal) {
-      const ST_STOP = ['dialogue_popup', 'popup', 'shadow_popup', 'draggable', 'popup_content'];
-      let el = modal.parentElement;
-      for (let i = 0; i < 3 && el && el.tagName !== 'BODY'; i++) {
-        if (ST_STOP.some(cls => el.classList?.contains(cls))) break;
-        el.style.background = 'transparent';
-        el.style.border = 'none';
-        el.style.boxShadow = 'none';
-        el.style.padding = '0';
-        el.style.borderRadius = '0';
-        el = el.parentElement;
-      }
-      // Hide OK button only in THIS specific popup, not globally
-      // Walk up to find the popup container, then find its button panel
-      let container = modal.parentElement;
-      for (let i = 0; i < 5 && container && container.tagName !== 'BODY'; i++) {
-        const panel = container.querySelector('.popup_button_panel, .menu_button_panel');
-        if (panel) { panel.style.display = 'none'; break; }
-        // Also try sibling
-        const sib = container.nextElementSibling;
-        if (sib?.classList?.contains('popup_button_panel') || sib?.querySelector('.menu_button')) {
-          sib.style.display = 'none'; break;
-        }
-        container = container.parentElement;
-      }
+    if (!modal) return;
+
+    // Strip visual styles from ST wrapper (max 5 levels up)
+    let el = modal.parentElement;
+    for (let i = 0; i < 5 && el && el.tagName !== 'BODY'; i++) {
+      el.style.setProperty('background',    'transparent', 'important');
+      el.style.setProperty('border',        'none',        'important');
+      el.style.setProperty('box-shadow',    'none',        'important');
+      el.style.setProperty('outline',       'none',        'important');
+      el.style.setProperty('padding',       '0',           'important');
+      el.style.setProperty('border-radius', '0',           'important');
+      if (i === 0) el.classList.add('sa-popup-host');
+      el = el.parentElement;
+    }
+
+    // Nuke immediately + keep polling every 80ms (ST adds OK asynchronously)
+    _nukeMainOK();
+    clearInterval(_okInterval);
+    _okInterval = setInterval(_nukeMainOK, 80);
+
+    // MutationObserver as extra safety net
+    const host = modal.parentElement?.parentElement || modal.parentElement;
+    if (host) {
+      _okObserver?.disconnect();
+      _okObserver = new MutationObserver(_nukeMainOK);
+      _okObserver.observe(host, { childList: true, subtree: true });
     }
   });
   await currentMainPopup.show();
+  clearInterval(_okInterval); _okInterval = null;
+  _okObserver?.disconnect(); _okObserver = null;
   currentMainPopup=null; updateBadge();
+}
+
+// ══════════════════════════════════════════════════════════
+//  ПОПАП СПРАВКИ
+// ══════════════════════════════════════════════════════════
+
+function openHelpPopup() {
+  const s = getSettings();
+  const html = `<div class="sa-help-inner" data-theme="${s.theme||'dark'}">
+  <div class="sa-editor-topbar">
+    <span class="sa-editor-topbar-title">📖 СораАтлас — справка</span>
+    <button type="button" class="sa-editor-close sa-help-close-btn">✕</button>
+  </div>
+
+  <div class="sa-help-section">
+    <div class="sa-help-icon">🗺️</div>
+    <div class="sa-help-block">
+      <div class="sa-help-title">Карта мира</div>
+      <div class="sa-help-text">Пространственная карта локаций. Нажми на тайл — откроется инфо о месте, персонажи, переходы. Активная локация помечена пульсирующей точкой. ИИ знает где ты находишься.</div>
+    </div>
+  </div>
+
+  <div class="sa-help-section">
+    <div class="sa-help-icon">🪄</div>
+    <div class="sa-help-block">
+      <div class="sa-help-title">Быстрый старт</div>
+      <div class="sa-help-text">1. Введи API ключ и выбери модель в ⚙️<br>2. Открой чат с персонажем<br>3. Нажми 🪄 — ИИ сам создаст карту мира<br>4. На вкладке Жилища нажми «Сгенерировать» — появятся планы квартир</div>
+    </div>
+  </div>
+
+  <div class="sa-help-section">
+    <div class="sa-help-icon">🏠</div>
+    <div class="sa-help-block">
+      <div class="sa-help-title">Жилища — чертёж</div>
+      <div class="sa-help-text">ИИ строит настоящий план квартиры на CSS-сетке. Красная рамка = ключевая комната. Наведи мышь — увидишь описание и предметы. Можно добавлять/редактировать комнаты вручную.</div>
+    </div>
+  </div>
+
+  <div class="sa-help-section">
+    <div class="sa-help-icon">💉</div>
+    <div class="sa-help-block">
+      <div class="sa-help-title">Инъекция</div>
+      <div class="sa-help-text">Переключатель «инъекция» — когда включён, ИИ в чате автоматически получает контекст: где ты, кто рядом, что за комната, куда можно пройти. Отключи если хочешь убрать это из промпта.</div>
+    </div>
+  </div>
+
+  <div class="sa-help-section">
+    <div class="sa-help-icon">🚶</div>
+    <div class="sa-help-block">
+      <div class="sa-help-title">Авто-трекинг</div>
+      <div class="sa-help-text">Когда ИИ пишет что кто-то куда-то пошёл — внизу появится тост «Обновить карту?». Нажми ✓ и карта обновится сама. Отключается в ⚙️.</div>
+    </div>
+  </div>
+
+  <div class="sa-help-section">
+    <div class="sa-help-icon">🏠</div>
+    <div class="sa-help-block">
+      <div class="sa-help-title">Кнопка «Я дома»</div>
+      <div class="sa-help-text">Если твой персонаж дома — нажми «Я дома». ИИ будет знать что ты на своей локации и не доступен снаружи. Персонажи на карте исчезнут с локаций пока ты дома.</div>
+    </div>
+  </div>
+
+  <div class="sa-help-quickset">
+    <div class="sa-help-qs-title">⚡ Быстрая настройка</div>
+    <div class="sa-help-qs-fields">
+      <div class="sa-sfield">
+        <label>API URL</label>
+        <input id="sa-qs-url" type="text" class="sa-sinput" placeholder="https://api.openai.com/v1" value="${saEsc(s.api_url||'')}">
+      </div>
+      <div class="sa-sfield">
+        <label>API Ключ</label>
+        <input id="sa-qs-key" type="password" class="sa-sinput" placeholder="sk-...  или  пустой для local" value="${saEsc(s.api_key||'')}">
+      </div>
+      <div class="sa-sfield">
+        <label>Модель</label>
+        <input id="sa-qs-model" type="text" class="sa-sinput" placeholder="gpt-4o-mini" value="${saEsc(s.model||'')}">
+      </div>
+      <button class="sa-help-save-btn" id="sa-qs-save"><i class="fa-solid fa-floppy-disk"></i> Сохранить</button>
+    </div>
+  </div>
+</div>`;
+
+  const popup = new Popup(html, POPUP_TYPE.TEXT, '', {allowVerticalScrolling: true});
+  requestAnimationFrame(() => {
+    patchSTPopup('.sa-help-inner');
+    document.querySelector('.sa-help-inner .sa-help-close-btn')?.addEventListener('click', () => popup.complete(false));
+    document.getElementById('sa-qs-save')?.addEventListener('click', () => {
+      const url   = document.getElementById('sa-qs-url')?.value?.trim();
+      const key   = document.getElementById('sa-qs-key')?.value?.trim();
+      const model = document.getElementById('sa-qs-model')?.value?.trim();
+      if (url)   saveSetting('api_url', url);
+      if (key !== undefined) saveSetting('api_key', key);
+      if (model) saveSetting('model', model);
+      showToast('✓ Настройки сохранены');
+      popup.complete(true);
+    });
+    // Nuke black frames from this popup too
+    const inner = document.querySelector('.sa-help-inner');
+    if (inner) {
+      let el = inner.parentElement;
+      while (el && el.tagName !== 'BODY') {
+        el.style.setProperty('background',   'transparent', 'important');
+        el.style.setProperty('border',       'none',        'important');
+        el.style.setProperty('box-shadow',   'none',        'important');
+        el.style.setProperty('outline',      'none',        'important');
+        el.style.setProperty('padding',      '0',           'important');
+        el.style.setProperty('border-radius','0',           'important');
+        el.querySelectorAll('.popup_button_panel,.menu_button_panel,.menu_button,.popup_ok_button').forEach(b => {
+          b.style.setProperty('display', 'none', 'important');
+        });
+        el = el.parentElement;
+      }
+    }
+  });
+  popup.show();
 }
 
 function bindMainEvents() {
   // Кнопка закрытия попапа
   document.getElementById('sa-btn-close')?.addEventListener('click', () => {
     if (currentMainPopup) currentMainPopup.complete(false);
+  });
+
+  // Кнопка справки — inline-панель внутри модала
+  document.getElementById('sa-btn-help')?.addEventListener('click', () => {
+    const existing = document.getElementById('sa-help-panel');
+    if (existing) { existing.remove(); return; }
+    const theme = getSettings().theme || 'dark';
+    const panel = document.createElement('div');
+    panel.id = 'sa-help-panel';
+    panel.dataset.theme = theme;
+    panel.innerHTML = `
+      <div class="sa-help-header">
+        <span class="sa-help-title">📖 Справка · СораАтлас</span>
+        <button class="sa-close-btn" id="sa-help-close">✕</button>
+      </div>
+      <div class="sa-help-body">
+        <div class="sa-help-section">
+          <div class="sa-help-section-title">🗺️ Карта мира</div>
+          <p>Локации расположены в пространстве. Пунктирные линии = связи между ними. Нажми тайл — открывается детальная карточка локации. Карандаш — редактировать. Активная локация помечена красной точкой.</p>
+        </div>
+        <div class="sa-help-section">
+          <div class="sa-help-section-title">🪄 Генерация мира</div>
+          <p>Нажми кнопку <b>✨</b> в шапке → AI создаст все локации и персонажей по карточке персонажа и лорбуку. Нужно задать API ключ в настройках ⚙️.</p>
+        </div>
+        <div class="sa-help-section">
+          <div class="sa-help-section-title">🏠 Жилища</div>
+          <p>Вкладка «Жилища» → нажми <b>✨ Сгенерировать все</b>. AI построит план квартиры каждого персонажа с комнатами, расположенными как настоящий чертёж. Нажимай на комнаты — увидишь всю инфу. Комната с красной рамкой = ключевая.</p>
+        </div>
+        <div class="sa-help-section">
+          <div class="sa-help-section-title">💉 Инжект</div>
+          <p>Переключатель «инъекция» = AI всегда знает текущую локацию, кто там находится и планировку жилища. Текст инжекта виден внизу вкладки «Карта».</p>
+        </div>
+        <div class="sa-help-section">
+          <div class="sa-help-section-title">🚶 Авто-трекинг</div>
+          <p>Когда AI пишет что персонаж куда-то перешёл — внизу экрана всплывает тост с предложением обновить карту. Можно включить/выключить в ⚙️ настройках.</p>
+        </div>
+        <div class="sa-help-section">
+          <div class="sa-help-section-title">⚙️ Быстрая настройка</div>
+          <div class="sa-help-quick">
+            <div class="sa-help-field">
+              <label>API URL</label>
+              <input type="text" id="sa-hq-url" placeholder="https://api.openai.com/v1" value="${saEsc(getSettings().api_url||'')}">
+            </div>
+            <div class="sa-help-field">
+              <label>API Ключ</label>
+              <input type="password" id="sa-hq-key" placeholder="sk-..." value="${saEsc(getSettings().api_key||'')}">
+            </div>
+            <div class="sa-help-field">
+              <label>Модель</label>
+              <input type="text" id="sa-hq-model" placeholder="gpt-4o-mini" value="${saEsc(getSettings().model||'')}">
+            </div>
+            <button class="sa-help-save-btn" id="sa-hq-save">💾 Сохранить</button>
+          </div>
+        </div>
+      </div>`;
+    const modal = document.getElementById('sa-modal');
+    modal?.appendChild(panel);
+    panel.querySelector('#sa-help-close')?.addEventListener('click', () => panel.remove());
+    panel.querySelector('#sa-hq-save')?.addEventListener('click', () => {
+      const url = panel.querySelector('#sa-hq-url')?.value || '';
+      const key = panel.querySelector('#sa-hq-key')?.value || '';
+      const model = panel.querySelector('#sa-hq-model')?.value || '';
+      if (url) saveSetting('api_url', url);
+      if (key) saveSetting('api_key', key);
+      if (model) saveSetting('model', model);
+      showToast('✓ Настройки сохранены');
+      panel.remove();
+    });
   });
 
   document.getElementById('sa-btn-user-home')?.addEventListener('click', () => {
@@ -1722,7 +2095,7 @@ function bindMainEvents() {
       } catch(e) { showToast(`✗ ${e.message}`, true); btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-wand-sparkles"></i>'; }
     });
   });
-  document.getElementById('sa-inject-toggle')?.addEventListener('change',e=>{saveSetting('enabled',e.target.checked);e.target.nextElementSibling?.classList.toggle('sa-tog-on',e.target.checked);showToast(e.target.checked?'✓ Инъекция включена':'✓ Инъекция выключена');});
+  document.getElementById('sa-inject-toggle')?.addEventListener('change',e=>{saveSetting('enabled',e.target.checked);e.target.nextElementSibling?.classList.toggle('sa-tog-on',e.target.checked);updatePromptInjection();showToast(e.target.checked?'✓ Инъекция включена':'✓ Инъекция выключена');});
   document.getElementById('sa-btn-clear')?.addEventListener('click',()=>{if(!confirm('Удалить карту мира?'))return;delete getSettings().worlds[getChatId()];saveSettingsDebounced();showToast('✓ Карта удалена');refreshMain();});
 
   document.getElementById('sa-btn-generate')?.addEventListener('click',async()=>{
@@ -1820,6 +2193,46 @@ function createUI() {
 let _init=false;
 function init() {
   if(_init)return; if(!document.getElementById('extensionsMenu'))return; _init=true;
+
+  // Inject a persistent <style> tag — higher priority than any external CSS
+  // Hides OK button ONLY when #sa-modal is present in the popup (main popup)
+  // Does NOT touch editor popups (.sa-editor-inner)
+  if (!document.getElementById('sa-global-style')) {
+    const s = document.createElement('style');
+    s.id = 'sa-global-style';
+    s.textContent = `
+      /* Main popup OK — hide only when #sa-modal is in the tree */
+      .sa-popup-host ~ .popup_button_panel,
+      .sa-popup-host > .popup_button_panel,
+      .sa-popup-host + .popup_button_panel {
+        display: none !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      /* Editor popup buttons — always visible, positioned below editor */
+      .sa-editor-inner ~ .popup_button_panel,
+      .sa-editor-inner + .popup_button_panel {
+        display: flex !important;
+        visibility: visible !important;
+        height: auto !important;
+        pointer-events: all !important;
+        align-items: center !important;
+        justify-content: flex-end !important;
+        gap: 8px !important;
+        padding: 10px 16px !important;
+        border-radius: 0 0 16px 16px !important;
+        overflow: visible !important;
+      }
+      /* Make editor scroll properly so buttons don't overlap content */
+      .sa-editor-inner {
+        max-height: calc(75vh - 56px) !important;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
   createUI(); $(document).on('click','#sa-menu-item',showMainPopup);
   const world = getWorld();
   syncUserToCurrentLocation(world);
@@ -1829,18 +2242,26 @@ function init() {
 
 jQuery(async()=>{
   getSettings();
-  eventSource.on(event_types.GENERATE_BEFORE_COMBINE_PROMPTS, onBeforeCombinePrompts);
-  // Хук на каждое новое сообщение AI — авто-трекинг движений
+
+  // ── Инжект через официальный ST API (работает в думалке!) ──
+  updatePromptInjection();
+  eventSource.on(event_types.MESSAGE_SENT, () => updatePromptInjection());
+  eventSource.on(event_types.MESSAGE_RECEIVED, () => updatePromptInjection());
+
+  // Хук на каждое новое сообщение AI — парсим теги и авто-трекинг
   eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
-  // Хук на смену чата — обновляем обои + синхронизируем юзера
+
+  // Хук на смену чата — обновляем обои + синхронизируем юзера + инжект
   eventSource.on(event_types.CHAT_CHANGED, () => {
     setTimeout(() => {
       const world = getWorld();
       syncUserToCurrentLocation(world);
       applyLocationWallpaper(world);
+      updatePromptInjection();
     }, 200);
   });
+
   eventSource.on(event_types.APP_READY, init);
   setTimeout(init, 300);
-  console.log('[СораАтлас] v1.5 loaded ✓');
+  console.log('[СораАтлас] v2.0 loaded ✓');
 });

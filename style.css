@@ -1,14 +1,66 @@
-/* СораАтлас v2.0 — переопределяем обёртку ST */
+/* СораАтлас v2.0 — стили */
 
-/* ── Убираем родной контур ST-попапа для ГЛАВНОГО модала ── */
+/* ══════════════════════════════════════════════════════════
+   УБИРАЕМ РАМКИ ТОЛЬКО У ПРЯМОГО РОДИТЕЛЯ #sa-modal
+   НЕ трогаем глобальные ST-попапы!
+   ══════════════════════════════════════════════════════════ */
+
+/* Только прямой родитель главного модала */
 *:has(> #sa-modal) {
-  padding: 0 !important;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
   border-radius: 0 !important;
 }
-/* Скрываем кнопку OK только для прямого родителя #sa-modal — через JS */
+
+/* Класс вешается JS только на хост главного попапа */
+.sa-popup-host {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* OK-кнопка только внутри нашего хоста */
+.sa-popup-host > .popup_button_panel,
+.sa-popup-host > .menu_button_panel {
+  display: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   НЕВИДИМЫЙ СКРОЛЛБАР — работает, но не виден
+   ══════════════════════════════════════════════════════════ */
+
+.sa-content,
+.sa-loc-inner,
+.sa-editor-inner,
+.sa-settings-body,
+.sa-chars-wrap,
+.sa-homes-list,
+.sa-smap-wrap,
+.sa-inject-full-preview,
+.sa-models-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sa-content::-webkit-scrollbar,
+.sa-loc-inner::-webkit-scrollbar,
+.sa-editor-inner::-webkit-scrollbar,
+.sa-settings-body::-webkit-scrollbar,
+.sa-chars-wrap::-webkit-scrollbar,
+.sa-homes-list::-webkit-scrollbar,
+.sa-smap-wrap::-webkit-scrollbar,
+.sa-inject-full-preview::-webkit-scrollbar,
+.sa-models-list::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 
 /* СораАтлас v2.0 — Новый облик */
 
@@ -159,8 +211,6 @@
   max-height: calc(90vh - 36px); /* 36px — высота frame-bar */
   overscroll-behavior: contain;
 }
-.sa-content::-webkit-scrollbar { width: 3px; }
-.sa-content::-webkit-scrollbar-thumb { background: var(--sa-scrollbar, rgba(240,168,188,0.22)); border-radius: 2px; }
 
 /* ══════════════════════════════════════════════════════════
    ТОКЕНЫ ТЕМЫ — ТЁМНАЯ (по умолчанию)
@@ -506,8 +556,6 @@
   gap: 6px;
   padding: 2px 0;
 }
-#sa-map-grid::-webkit-scrollbar { width: 3px; }
-#sa-map-grid::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
 
 /* ── Тайл локации ───────────────────────────────────────────── */
 .sa-tile {
@@ -696,8 +744,6 @@
    ══════════════════════════════════════════════════════════ */
 
 .sa-chars-wrap { display: flex; flex-direction: column; gap: 6px; }
-.sa-chars-wrap::-webkit-scrollbar { width: 3px; }
-.sa-chars-wrap::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
 
 .sa-chars-header {
   display: flex;
@@ -769,8 +815,6 @@
   flex-shrink: 0;
 }
 .sa-homes-list { display: flex; flex-direction: column; gap: 8px; }
-.sa-homes-list::-webkit-scrollbar { width: 3px; }
-.sa-homes-list::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
 
 .sa-home-card {
   border: 1px solid var(--sa-border);
@@ -891,8 +935,6 @@
   flex-direction: column;
   gap: 7px;
 }
-.sa-settings-body::-webkit-scrollbar { width: 3px; }
-.sa-settings-body::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
 
 .sa-settings-section {
   border: 1px solid var(--sa-border);
@@ -1175,10 +1217,6 @@
   color: var(--sa-text);
 }
 
-.sa-editor-inner::-webkit-scrollbar { width: 4px; }
-.sa-editor-inner::-webkit-scrollbar-track { background: transparent; }
-.sa-editor-inner::-webkit-scrollbar-thumb { background: var(--sa-scrollbar, rgba(240,168,188,0.22)); border-radius: 3px; }
-.sa-editor-inner::-webkit-scrollbar-thumb:hover { background: var(--sa-baccent, rgba(240,168,188,0.4)); }
 
 
 /* ── Топбар редактора (закрытие) ──────────────────────────── */
@@ -1598,71 +1636,7 @@
 }
 
 
-/* ── Кнопки ST CONFIRM-попапа (Сохранить / Отмена) ─────────── */
-*:has(> .sa-editor-inner) .popup_button_panel,
-*:has(> .sa-editor-inner) ~ .popup_button_panel {
-  background: linear-gradient(90deg,
-    rgba(240,168,188,0.03),
-    rgba(196,168,232,0.02),
-    rgba(240,168,188,0.03)) !important;
-  border-top: 1px solid rgba(255,255,255,0.06) !important;
-  padding: 8px 12px !important;
-  gap: 6px !important;
-  display: flex !important;
-  justify-content: flex-end !important;
-}
 
-/* Кнопка OK/Сохранить */
-*:has(> .sa-editor-inner) .popup_ok_button,
-*:has(> .sa-editor-inner) ~ * .popup_ok_button,
-*:has(.sa-editor-inner) .menu_button.popup_ok_button {
-  background: rgba(240,168,188,0.12) !important;
-  border: 1px solid rgba(240,168,188,0.3) !important;
-  color: #f0a8bc !important;
-  border-radius: 5px !important;
-  font-family: 'Jost', sans-serif !important;
-  font-size: 0.78rem !important;
-  letter-spacing: 0.05em !important;
-  padding: 6px 14px !important;
-  cursor: pointer !important;
-  transition: all 0.18s !important;
-}
-
-/* Кнопка Отмена */
-*:has(.sa-editor-inner) .menu_button:not(.popup_ok_button) {
-  background: rgba(255,255,255,0.04) !important;
-  border: 1px solid rgba(255,255,255,0.09) !important;
-  color: rgba(255,255,255,0.4) !important;
-  border-radius: 5px !important;
-  font-family: 'Jost', sans-serif !important;
-  font-size: 0.78rem !important;
-  padding: 6px 14px !important;
-  cursor: pointer !important;
-  transition: all 0.18s !important;
-}
-
-/* ══════════════════════════════════════════════════════════
-   СКРОЛЛБАРЫ — стилизованные везде
-   ══════════════════════════════════════════════════════════ */
-
-#sa-modal ::-webkit-scrollbar,
-.sa-loc-popup ::-webkit-scrollbar { width: 4px; height: 4px; }
-
-#sa-modal ::-webkit-scrollbar-track,
-.sa-loc-popup ::-webkit-scrollbar-track {
-  background: transparent;
-}
-#sa-modal ::-webkit-scrollbar-thumb,
-.sa-loc-popup ::-webkit-scrollbar-thumb {
-  background: var(--sa-scrollbar);
-  border-radius: 3px;
-}
-#sa-modal ::-webkit-scrollbar-thumb:hover,
-.sa-loc-popup ::-webkit-scrollbar-thumb:hover {
-  background: var(--sa-baccent);
-}
-
-/* ══════════════════════════════════════════════════════════
    ПОПАП ЛОКАЦИИ — отдельный фрейм
    ══════════════════════════════════════════════════════════ */
 
@@ -1802,16 +1776,6 @@
 }
 
 
-/* ── Кнопки confirm-попапов ──────────────────────────────── */
-.popup_button_panel:has(~ .sa-editor-inner),
-.sa-editor-inner ~ .popup_button_panel,
-*:has(.sa-editor-inner) .popup_button_panel {
-  background: rgba(14,14,28,0.98) !important;
-  border-top: 1px solid rgba(255,255,255,0.07) !important;
-  padding: 8px 16px !important;
-  gap: 8px !important;
-}
-
 /* ── Разные элементы внутри редактора — чёткие цвета ─────── */
 .sa-editor-inner .sa-hint {
   font-size: 0.58rem !important;
@@ -1870,10 +1834,6 @@
 }
 
 /* Скролл внутри редактора */
-.sa-editor-inner::-webkit-scrollbar { width: 4px !important; }
-.sa-editor-inner::-webkit-scrollbar-track { background: transparent !important; }
-.sa-editor-inner::-webkit-scrollbar-thumb { background: rgba(240,168,188,0.25) !important; border-radius: 3px !important; }
-.sa-editor-inner[data-theme="light"]::-webkit-scrollbar-thumb { background: rgba(184,64,48,0.22) !important; }
 
 
 /* ══════════════════════════════════════════════════════════
@@ -2071,8 +2031,6 @@
   border: 1px solid var(--sa-border);
   border-radius: 5px;
 }
-.sa-models-list::-webkit-scrollbar { width: 3px; }
-.sa-models-list::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
 
 .sa-model-chip {
   padding: 2px 8px;
@@ -2813,8 +2771,6 @@
   padding: 4px 0 8px;
   -webkit-overflow-scrolling: touch;
 }
-.sa-smap-wrap::-webkit-scrollbar { height: 4px; }
-.sa-smap-wrap::-webkit-scrollbar-thumb { background: var(--sa-scrollbar); border-radius: 2px; }
 
 .sa-smap-container {
   position: relative;
@@ -2919,4 +2875,801 @@
   .sa-bp-room { min-height: 70px; padding-bottom: 18px; }
   .sa-bp-icon { font-size: 1.2rem; }
   .sa-bp-tooltip, .sa-tile-tooltip { width: 170px; font-size: 0.9em; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   ЦЕНТРИРОВАНИЕ ОКНА + УБИРАЕМ ЧЁРНУЮ РАМКУ ВЕЗДЕ
+   ══════════════════════════════════════════════════════════ */
+
+/* Хост попапа ST — прозрачный, центрированный */
+.sa-popup-host,
+*:has(> #sa-modal) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 auto !important;
+}
+
+/* Редактор — убираем все чёрные рамки (только сам элемент) */
+.sa-editor-inner {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   КАРТА — ЦЕНТРИРОВАНИЕ + ТУЛТИПЫ НЕ ОБРЕЗАЮТСЯ
+   ══════════════════════════════════════════════════════════ */
+
+.sa-smap-wrap {
+  overflow: visible !important;  /* тултипы не режем */
+  width: 100%;
+  padding: 12px 0;
+}
+
+/* Внешняя оболочка — центрирует карту */
+.sa-smap-outer {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 8px 0 20px;
+}
+
+/* Контейнер тайлов — position:relative, overflow:visible */
+.sa-smap-container {
+  position: relative;
+  flex-shrink: 0;
+  overflow: visible !important;
+}
+
+/* Тайлы карты — тултип рендерится поверх всего */
+.sa-smap-tile {
+  overflow: visible !important;
+  z-index: 2;
+}
+.sa-smap-tile:hover {
+  z-index: 100 !important;
+}
+
+/* Тултипы на карте — фиксированное позиционирование через transform */
+.sa-smap-tile .sa-tile-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999 !important;
+  pointer-events: none;
+  white-space: normal;
+}
+.sa-smap-tile:hover .sa-tile-tooltip {
+  display: block !important;
+}
+
+/* Не дать правым тайлам уходить за экран */
+.sa-smap-tile:nth-child(3n) .sa-tile-tooltip,
+.sa-smap-tile:last-child .sa-tile-tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.sa-smap-tile:nth-child(3n+1) .sa-tile-tooltip {
+  left: 0;
+  transform: none;
+}
+
+/* ══════════════════════════════════════════════════════════
+   КНОПКА СПРАВКИ
+   ══════════════════════════════════════════════════════════ */
+
+.sa-help-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.35);
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-family: var(--sa-sans);
+  transition: all 0.18s;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.sa-help-btn:hover {
+  background: rgba(240,168,188,0.15);
+  border-color: rgba(240,168,188,0.4);
+  color: var(--sa-accent);
+}
+#sa-modal[data-theme="light"] .sa-help-btn {
+  background: rgba(61,31,24,0.05);
+  border-color: rgba(61,31,24,0.18);
+  color: rgba(61,31,24,0.4);
+}
+#sa-modal[data-theme="light"] .sa-help-btn:hover {
+  background: rgba(184,64,48,0.1);
+  border-color: rgba(184,64,48,0.35);
+  color: var(--sa-accent);
+}
+
+/* ══════════════════════════════════════════════════════════
+   ПАНЕЛЬ СПРАВКИ
+   ══════════════════════════════════════════════════════════ */
+
+#sa-help-panel {
+  /* CSS vars — тёмная тема */
+  --sa-bg:      #0d0d1a;
+  --sa-accent:  #f0a8bc;
+  --sa-violet:  #c4a8e8;
+  --sa-text:    #d8cfd8;
+  --sa-mid:     rgba(255,255,255,0.55);
+  --sa-dim:     rgba(255,255,255,0.3);
+  --sa-faint:   rgba(255,255,255,0.16);
+  --sa-border:  rgba(255,255,255,0.07);
+  --sa-baccent: rgba(240,168,188,0.22);
+  --sa-mist:    rgba(240,168,188,0.1);
+  --sa-mist0:   rgba(240,168,188,0.05);
+  --sa-serif:   'Cormorant Garamond', Georgia, serif;
+  --sa-sans:    'Jost', system-ui, sans-serif;
+  --sa-input-bg:    rgba(255,255,255,0.04);
+  --sa-input-bdr:   rgba(255,255,255,0.12);
+  --sa-input-focus: rgba(240,168,188,0.4);
+  --sa-input-color: #ccc;
+
+  position: absolute;
+  top: 36px; /* под frame-bar */
+  right: 0;
+  width: min(360px, 92vw);
+  background: linear-gradient(160deg, rgba(14,14,28,0.99), rgba(9,9,20,0.99));
+  border: 1px solid rgba(240,168,188,0.2);
+  border-radius: 0 0 8px 8px;
+  border-top: none;
+  z-index: 10000;
+  font-family: var(--sa-sans);
+  color: var(--sa-text);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+  animation: sa-fadeIn 0.18s ease;
+  max-height: 80vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+#sa-help-panel::-webkit-scrollbar { display: none; }
+
+#sa-help-panel[data-theme="light"] {
+  --sa-accent:  #b84030;
+  --sa-text:    #3d1f18;
+  --sa-mid:     rgba(61,31,24,0.65);
+  --sa-dim:     rgba(61,31,24,0.45);
+  --sa-faint:   rgba(61,31,24,0.22);
+  --sa-border:  rgba(61,31,24,0.1);
+  --sa-baccent: rgba(184,64,48,0.25);
+  --sa-mist:    rgba(184,64,48,0.09);
+  --sa-mist0:   rgba(184,64,48,0.04);
+  --sa-input-bg: rgba(255,255,255,0.7);
+  --sa-input-bdr: rgba(61,31,24,0.15);
+  --sa-input-focus: rgba(184,64,48,0.4);
+  --sa-input-color: #3d1f18;
+  background: rgba(250,246,240,0.99);
+  border-color: rgba(184,64,48,0.2);
+  box-shadow: 0 16px 48px rgba(61,31,24,0.15);
+}
+
+.sa-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sa-border);
+  flex-shrink: 0;
+}
+.sa-help-title {
+  font-family: var(--sa-serif);
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--sa-accent);
+  letter-spacing: 0.08em;
+}
+
+.sa-help-body {
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sa-help-section {
+  border: 1px solid var(--sa-border);
+  border-radius: 7px;
+  padding: 9px 11px;
+  background: rgba(255,255,255,0.015);
+}
+#sa-help-panel[data-theme="light"] .sa-help-section {
+  background: rgba(255,255,255,0.35);
+}
+
+.sa-help-section-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--sa-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 6px;
+}
+.sa-help-section p {
+  font-size: 0.7rem;
+  color: var(--sa-mid);
+  line-height: 1.6;
+  margin: 0;
+}
+.sa-help-section p b { color: var(--sa-accent); font-weight: 600; }
+
+/* Быстрая настройка внутри справки */
+.sa-help-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+}
+.sa-help-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sa-help-field label {
+  font-size: 0.57rem;
+  color: var(--sa-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.sa-help-field input {
+  background: var(--sa-input-bg);
+  border: 1px solid var(--sa-input-bdr);
+  border-radius: 5px;
+  color: var(--sa-input-color);
+  padding: 6px 10px;
+  font-family: var(--sa-sans);
+  font-size: 0.78rem;
+  outline: none;
+  transition: border-color 0.18s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.sa-help-field input:focus {
+  border-color: var(--sa-input-focus);
+}
+.sa-help-save-btn {
+  margin-top: 4px;
+  padding: 7px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--sa-baccent);
+  background: var(--sa-mist0);
+  color: var(--sa-accent);
+  font-family: var(--sa-sans);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.18s;
+  width: 100%;
+}
+.sa-help-save-btn:hover { background: var(--sa-mist); }
+
+/* ══════════════════════════════════════════════════════════
+   ЦЕНТРИРОВАНИЕ КАРТЫ МИРА
+   ══════════════════════════════════════════════════════════ */
+
+.sa-smap-outer {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 0;
+}
+
+.sa-smap-container {
+  margin: 0 auto;
+}
+
+/* Тултипы не обрезать — overflow visible на обёртках */
+.sa-smap-wrap,
+.sa-smap-outer,
+#sa-tab-map,
+.sa-tab-pane {
+  overflow: visible !important;
+}
+
+/* Тултипы карты — не обрезаются */
+.sa-smap-tile {
+  overflow: visible !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   КНОПКА СПРАВКИ
+   ══════════════════════════════════════════════════════════ */
+
+.sa-help-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(196,168,232,0.12);
+  border: 1px solid rgba(196,168,232,0.3);
+  color: rgba(196,168,232,0.8);
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: var(--sa-sans);
+  transition: all 0.18s;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+.sa-help-btn:hover {
+  background: rgba(196,168,232,0.22);
+  border-color: rgba(196,168,232,0.6);
+  color: var(--sa-violet);
+  transform: scale(1.1);
+}
+#sa-modal[data-theme="light"] .sa-help-btn {
+  background: rgba(125,78,138,0.08);
+  border-color: rgba(125,78,138,0.25);
+  color: rgba(125,78,138,0.7);
+}
+
+/* ══════════════════════════════════════════════════════════
+   ПОПАП СПРАВКИ
+   ══════════════════════════════════════════════════════════ */
+
+.sa-help-inner {
+  /* Тёмная тема по умолчанию */
+  --sa-bg:      #0d0d1a;
+  --sa-bg3:     rgba(255,255,255,0.025);
+  --sa-accent:  #f0a8bc;
+  --sa-violet:  #c4a8e8;
+  --sa-text:    #d8cfd8;
+  --sa-mid:     rgba(255,255,255,0.55);
+  --sa-dim:     rgba(255,255,255,0.3);
+  --sa-faint:   rgba(255,255,255,0.16);
+  --sa-border:  rgba(255,255,255,0.07);
+  --sa-baccent: rgba(240,168,188,0.22);
+  --sa-mist:    rgba(240,168,188,0.1);
+  --sa-mist0:   rgba(240,168,188,0.05);
+  --sa-serif:   'Cormorant Garamond', Georgia, serif;
+  --sa-sans:    'Jost', system-ui, sans-serif;
+  --sa-input-bg:  rgba(255,255,255,0.04);
+  --sa-input-bdr: rgba(255,255,255,0.09);
+  --sa-input-focus: rgba(240,168,188,0.4);
+  --sa-input-color: #ccc;
+  --sa-hint-clr: #666;
+  --sa-select-bg: #111;
+  --sa-scrollbar: rgba(240,168,188,0.22);
+
+  background: linear-gradient(160deg, rgba(18,18,32,0.99), rgba(11,11,20,0.99)) !important;
+  color: var(--sa-text);
+  font-family: var(--sa-sans);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 16px 18px 20px;
+  max-height: 82vh;
+  overflow-y: auto;
+  width: 380px;
+  max-width: 96vw;
+  box-sizing: border-box;
+  border-radius: 8px;
+}
+
+.sa-help-inner[data-theme="light"] {
+  background: var(--sa-bg) !important;
+  --sa-bg:      #faf6f0;
+  --sa-bg3:     rgba(255,255,255,0.55);
+  --sa-accent:  #b84030;
+  --sa-violet:  #7d4e8a;
+  --sa-text:    #3d1f18;
+  --sa-mid:     rgba(61,31,24,0.65);
+  --sa-dim:     rgba(61,31,24,0.45);
+  --sa-faint:   rgba(61,31,24,0.22);
+  --sa-border:  rgba(61,31,24,0.1);
+  --sa-baccent: rgba(184,64,48,0.25);
+  --sa-mist:    rgba(184,64,48,0.09);
+  --sa-mist0:   rgba(184,64,48,0.04);
+  --sa-input-bg:  rgba(255,255,255,0.7);
+  --sa-input-bdr: rgba(61,31,24,0.15);
+  --sa-input-focus: rgba(184,64,48,0.4);
+  --sa-input-color: #3d1f18;
+  --sa-hint-clr:  #9a8070;
+  --sa-select-bg: #fff;
+}
+
+/* Секция справки */
+.sa-help-section {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--sa-border);
+}
+.sa-help-section:last-of-type { border-bottom: none; }
+
+.sa-help-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+  margin-top: 2px;
+}
+
+.sa-help-block { flex: 1; min-width: 0; }
+
+.sa-help-title {
+  font-family: var(--sa-serif);
+  font-size: 0.88rem;
+  font-style: italic;
+  color: var(--sa-accent);
+  margin-bottom: 4px;
+}
+
+.sa-help-text {
+  font-size: 0.7rem;
+  color: var(--sa-mid);
+  line-height: 1.65;
+}
+
+/* Быстрая настройка */
+.sa-help-quickset {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--sa-baccent);
+  border-radius: 8px;
+  background: var(--sa-mist0);
+}
+
+.sa-help-qs-title {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--sa-accent);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.sa-help-qs-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sa-help-inner .sa-sfield label {
+  font-size: 0.58rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: var(--sa-hint-clr) !important;
+  margin-bottom: 3px !important;
+  display: block;
+}
+
+.sa-help-inner .sa-sinput {
+  background: var(--sa-input-bg);
+  border: 1px solid var(--sa-input-bdr);
+  border-radius: 4px;
+  color: var(--sa-input-color);
+  padding: 6px 9px;
+  font-family: var(--sa-sans);
+  font-size: 0.78rem;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.18s;
+}
+.sa-help-inner .sa-sinput:focus { border-color: var(--sa-input-focus); }
+
+.sa-help-save-btn {
+  padding: 8px 16px;
+  border-radius: 5px;
+  border: 1px solid var(--sa-baccent);
+  background: var(--sa-mist0);
+  color: var(--sa-accent);
+  font-family: var(--sa-sans);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: all 0.18s;
+  font-weight: 500;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+}
+.sa-help-save-btn:hover { background: var(--sa-mist); }
+
+/* Topbar в help popup переиспользует editor topbar */
+.sa-help-inner .sa-editor-topbar {
+  background: transparent !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   ФИКС — убираем черные рамки от ST на редакторах
+   Используем ТОЛЬКО прямого родителя, не глобальный has()
+   ══════════════════════════════════════════════════════════ */
+
+/* Прямой родитель .sa-editor-inner — прозрачный */
+*:has(> .sa-editor-inner) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+}
+
+/* Прямой родитель .sa-loc-popup */
+*:has(> .sa-loc-popup) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+}
+
+/* Сами элементы — оставляем свои фоны */
+.sa-editor-inner { background: #131322 !important; }
+.sa-editor-inner[data-theme="light"] { background: #faf6f0 !important; }
+
+/* Для редактора: Сохранить/Отмена ДОЛЖНЫ быть видны — не скрываем их */
+
+/* ══════════════════════════════════════════════════════════
+   СКРУГЛЕНИЯ — убираем квадратность везде
+   ══════════════════════════════════════════════════════════ */
+
+/* Главный модал */
+#sa-modal {
+  border-radius: 16px !important;
+  overflow: hidden !important;
+}
+
+/* Тайлы карты */
+.sa-tile,
+.sa-smap-tile {
+  border-radius: 14px !important;
+}
+
+/* Тайлы карты — обложки */
+.sa-tile-cover { border-radius: 13px !important; }
+
+/* Карточки персонажей */
+.sa-char-row { border-radius: 12px !important; }
+
+/* Карточки жилищ */
+.sa-home-card { border-radius: 14px !important; }
+
+/* Комнаты в плане */
+.sa-bp-room { border-radius: 0 !important; } /* чертёж — специально квадратный */
+.sa-floorplan-room { border-radius: 10px !important; }
+
+/* Табы */
+.sa-tab { border-radius: 8px 8px 0 0 !important; }
+
+/* Кнопки */
+.sa-small-btn    { border-radius: 8px !important; }
+.sa-head-btn     { border-radius: 8px !important; }
+.sa-set-btn      { border-radius: 10px !important; }
+.sa-map-add-btn  { border-radius: 10px !important; }
+.sa-conn-btn     { border-radius: 8px !important; }
+.sa-move-btn     { border-radius: 8px !important; }
+.sa-help-btn     { border-radius: 50% !important; }
+.sa-close-btn    { border-radius: 6px !important; }
+.sa-add-first-btn { border-radius: 10px !important; }
+
+/* Инпуты и текстареи */
+.sa-sinput,
+.sa-editor-inner input[type="text"],
+.sa-editor-inner input[type="password"],
+.sa-editor-inner input[type="number"],
+.sa-editor-inner textarea,
+.sa-editor-inner select {
+  border-radius: 10px !important;
+}
+
+/* Иконки пикер */
+.sa-icon-picker  { border-radius: 10px !important; }
+.sa-icon-opt     { border-radius: 6px !important; }
+
+/* Чип-бейджи */
+.sa-badge            { border-radius: 6px !important; }
+.sa-type-badge       { border-radius: 5px !important; }
+.sa-model-chip       { border-radius: 6px !important; }
+.sa-tooltip-badge,
+.sa-bptt-badge       { border-radius: 5px !important; }
+.sa-home-status-chip { border-radius: 20px !important; }
+.sa-at-home-badge    { border-radius: 4px !important; }
+
+/* Тултипы */
+.sa-tile-tooltip,
+.sa-floorplan-tooltip,
+.sa-bp-tooltip      { border-radius: 12px !important; }
+
+/* Секции настроек */
+.sa-settings-section { border-radius: 12px !important; }
+
+/* Попап локации */
+.sa-loc-popup     { border-radius: 16px !important; }
+.sa-loc-cover     { border-radius: 12px !important; }
+.sa-loc-desc      { border-radius: 10px !important; }
+
+/* Редактор */
+.sa-editor-inner  { border-radius: 0 !important; } /* внутри ST-попапа — пусть ST сам скругляет */
+.sa-cover-upload  { border-radius: 10px !important; }
+.sa-cover-preview { border-radius: 10px !important; }
+
+/* Движение тост */
+.sa-move-toast    { border-radius: 14px !important; }
+
+/* Blueprint */
+.sa-blueprint     { border-radius: 12px !important; }
+
+/* Панель справки */
+#sa-help-panel    { border-radius: 0 0 16px 16px !important; }
+.sa-help-section  { border-radius: 12px !important; }
+.sa-help-save-btn { border-radius: 10px !important; }
+.sa-help-field input { border-radius: 8px !important; }
+
+/* Статус-бар */
+.sa-home-status-bar { border-radius: 12px !important; }
+
+/* Генерация опции */
+.sa-homes-gen-opts { border-radius: 12px !important; }
+
+/* Аватары */
+.sa-avatar,
+.sa-avatar-img,
+.sa-avatar-initial { border-radius: 50% !important; }
+
+/* Кнопки опасные */
+.sa-btn-danger { border-radius: 10px !important; }
+
+/* Чекбоксы-лейблы */
+.sa-chk-label,
+.sa-check-label { border-radius: 8px !important; }
+
+/* Попап-хост — принудительно прозрачный */
+.sa-popup-host {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+/* Дочерние панели кнопок внутри хоста */
+.sa-popup-host .popup_button_panel,
+.sa-popup-host .menu_button_panel,
+.sa-popup-host ~ .popup_button_panel,
+.sa-popup-host ~ .menu_button_panel {
+  display: none !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   ГЛАВНЫЙ ПОПАП — OK скрыт через JS+CSS (sa-popup-host)
+   РЕДАКТОР — Сохранить/Отмена видны и красивы
+   ══════════════════════════════════════════════════════════ */
+
+/* Прячем OK в главном попапе — прямой/соседний дочерний */
+.sa-popup-host,
+.sa-popup-host > *:not(#sa-modal) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+.sa-popup-host > .popup_button_panel,
+.sa-popup-host + .popup_button_panel,
+.sa-popup-host ~ .popup_button_panel {
+  display: none !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* ── РЕДАКТОР: кнопки Сохранить/Отмена ──────────────────── */
+
+/* Панель кнопок — красивая, прилеплена снизу к редактору */
+.sa-editor-inner ~ .popup_button_panel,
+.sa-editor-inner + .popup_button_panel {
+  display: flex !important;
+  visibility: visible !important;
+  height: auto !important;
+  pointer-events: all !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  padding: 10px 16px 12px !important;
+  background: #0d0d1a !important;
+  border-top: 1px solid rgba(255,255,255,0.07) !important;
+  border-radius: 0 0 16px 16px !important;
+}
+
+/* Кнопка Сохранить — тёмная */
+.sa-editor-inner ~ .popup_button_panel .popup_ok_button,
+.sa-editor-inner + .popup_button_panel .popup_ok_button {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 8px 20px !important;
+  background: rgba(240,168,188,0.15) !important;
+  border: 1px solid rgba(240,168,188,0.4) !important;
+  border-radius: 10px !important;
+  color: #f0a8bc !important;
+  font-family: 'Jost', sans-serif !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.18s !important;
+  letter-spacing: 0.04em !important;
+}
+.sa-editor-inner ~ .popup_button_panel .popup_ok_button:hover,
+.sa-editor-inner + .popup_button_panel .popup_ok_button:hover {
+  background: rgba(240,168,188,0.28) !important;
+  border-color: rgba(240,168,188,0.65) !important;
+}
+
+/* Кнопка Отмена — тёмная */
+.sa-editor-inner ~ .popup_button_panel .menu_button:not(.popup_ok_button),
+.sa-editor-inner + .popup_button_panel .menu_button:not(.popup_ok_button) {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 8px 16px !important;
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 10px !important;
+  color: rgba(255,255,255,0.45) !important;
+  font-family: 'Jost', sans-serif !important;
+  font-size: 0.8rem !important;
+  cursor: pointer !important;
+  transition: all 0.18s !important;
+}
+.sa-editor-inner ~ .popup_button_panel .menu_button:not(.popup_ok_button):hover,
+.sa-editor-inner + .popup_button_panel .menu_button:not(.popup_ok_button):hover {
+  background: rgba(255,255,255,0.09) !important;
+  color: rgba(255,255,255,0.7) !important;
+}
+
+/* ── СВЕТЛАЯ ТЕМА редактор ──────────────────────────────── */
+.sa-editor-inner[data-theme="light"] ~ .popup_button_panel,
+.sa-editor-inner[data-theme="light"] + .popup_button_panel {
+  background: #f4ede2 !important;
+  border-top: 1px solid rgba(61,31,24,0.12) !important;
+}
+.sa-editor-inner[data-theme="light"] ~ .popup_button_panel .popup_ok_button {
+  background: rgba(184,64,48,0.1) !important;
+  border-color: rgba(184,64,48,0.35) !important;
+  color: #b84030 !important;
+}
+.sa-editor-inner[data-theme="light"] ~ .popup_button_panel .popup_ok_button:hover {
+  background: rgba(184,64,48,0.2) !important;
+  border-color: rgba(184,64,48,0.55) !important;
+}
+.sa-editor-inner[data-theme="light"] ~ .popup_button_panel .menu_button:not(.popup_ok_button) {
+  background: rgba(61,31,24,0.05) !important;
+  border-color: rgba(61,31,24,0.15) !important;
+  color: rgba(61,31,24,0.5) !important;
+}
+.sa-editor-inner[data-theme="light"] ~ .popup_button_panel .menu_button:not(.popup_ok_button):hover {
+  background: rgba(61,31,24,0.1) !important;
+  color: rgba(61,31,24,0.8) !important;
 }
